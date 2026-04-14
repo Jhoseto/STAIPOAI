@@ -99,8 +99,8 @@ steps:
         BACKEND_URL=$(gcloud run services describe $_BACKEND_SERVICE \
           --region=$_REGION \
           --format='value(status.url)')
-        echo "Backend URL: $BACKEND_URL"
-        echo -n "$BACKEND_URL" > /workspace/backend_url.txt
+        echo "Backend URL: $$BACKEND_URL"
+        echo -n "$$BACKEND_URL" > /workspace/backend_url.txt
 
   # ── 7. Deploy FRONTEND с правилен AI_DATA_URL ─────────────
   #   AI_DATA_URL = URL на backend сервиса (runtime env var)
@@ -113,14 +113,14 @@ steps:
       - -c
       - |
         BACKEND_URL=$(cat /workspace/backend_url.txt)
-        echo "Deploying frontend → AI_DATA_URL=$BACKEND_URL"
+        echo "Deploying frontend → AI_DATA_URL=$$BACKEND_URL"
         gcloud run deploy $_FRONTEND_SERVICE \
           --image=gcr.io/$PROJECT_ID/$_FRONTEND_SERVICE:$COMMIT_SHA \
           --region=$_REGION \
           --platform=managed \
           --allow-unauthenticated \
           --port=8080 \
-          --set-env-vars="AI_DATA_URL=$BACKEND_URL,NEXT_PUBLIC_SUPABASE_URL=$_NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY=$_NEXT_PUBLIC_SUPABASE_ANON_KEY,SUPABASE_URL=$_SUPABASE_URL,SUPABASE_ANON_KEY=$_SUPABASE_ANON_KEY,SUPABASE_SERVICE_ROLE_KEY=$_SUPABASE_SERVICE_ROLE_KEY,NEXTAUTH_URL=$_FRONTEND_URL,NEXTAUTH_SECRET=$_NEXTAUTH_SECRET,GOOGLE_CLIENT_ID=$_GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET=$_GOOGLE_CLIENT_SECRET"
+          --set-env-vars="AI_DATA_URL=$$BACKEND_URL,NEXT_PUBLIC_SUPABASE_URL=$_NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY=$_NEXT_PUBLIC_SUPABASE_ANON_KEY,SUPABASE_URL=$_SUPABASE_URL,SUPABASE_ANON_KEY=$_SUPABASE_ANON_KEY,SUPABASE_SERVICE_ROLE_KEY=$_SUPABASE_SERVICE_ROLE_KEY,NEXTAUTH_URL=$_FRONTEND_URL,NEXTAUTH_SECRET=$_NEXTAUTH_SECRET,GOOGLE_CLIENT_ID=$_GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET=$_GOOGLE_CLIENT_SECRET"
 
 images:
   - gcr.io/$PROJECT_ID/$_BACKEND_SERVICE:$COMMIT_SHA
