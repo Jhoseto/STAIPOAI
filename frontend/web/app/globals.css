@@ -1,0 +1,340 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* STAIPO AI - ULTRA PREMIUM SILVER GLASS DESIGN SYSTEM */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-border: var(--border);
+  --color-card: var(--card);
+}
+
+:root {
+  /* Silver / Grey Glass Palette */
+  --background: #F2F4F7; /* Very subtle cool grey background */
+  --foreground: #111827; /* Near black texts */
+  --card: rgba(255, 255, 255, 0.75); /* Frosted glass white */
+  --border: rgba(255, 255, 255, 0.8); /* Highlight edge */
+  --muted: #4B5563; /* Medium grey for secondary text */
+  
+  --silver-light: #F9FAFB;
+  --silver-mid: #E5E7EB;
+  --silver-dark: #D1D5DB;
+
+  /* BLUEPRINT CAD THEME TOKENS - MONOCHROME SILVER GLASS */
+  --blueprint-accent: #64748B; /* Slate 500 */
+  --blueprint-accent-glow: rgba(148, 163, 184, 0.2);
+  --silver-metallic: linear-gradient(135deg, #F8FAFC 0%, #E2E8F0 45%, #CBD5E1 100%);
+  --sidebar-glass: rgba(255, 255, 255, 0.6);
+
+  /* Form components fallback defaults */
+  --primary: #F3F4F6;
+  --primary-foreground: #000000;
+  --ring: #9CA3AF;
+
+  /* ALMOND SILK & GOLD LUXURY THEME TOKENS */
+  --almond-silk-bg: #FDFBF7;
+  --almond-silk-card: rgba(253, 251, 247, 0.85);
+  --gold-accent: #D4AF37;
+  --gold-accent-light: #F3E5AB;
+  --gold-accent-dark: #AA8B2C;
+  --luxury-text-primary: #2C2C2C;
+  --luxury-text-secondary: #707070;
+}
+
+@layer utilities {
+  .font-luxury {
+    font-family: 'Cormorant Garamond', serif;
+  }
+  .bg-almond-silk {
+    background-color: var(--almond-silk-bg);
+  }
+  .bg-almond-silk-card {
+    background-color: var(--almond-silk-card);
+  }
+  .text-gold {
+    color: var(--gold-accent);
+  }
+  .border-gold {
+    border-color: var(--gold-accent-light);
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--silver-mid);
+    outline: none;
+  }
+  
+  html {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    background: var(--background);
+    background-image: 
+      radial-gradient(at 0% 0%, rgba(255,255,255,1) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, rgba(229, 231, 235, 1) 0px, transparent 50%);
+    background-attachment: fixed;
+    scroll-behavior: smooth;
+  }
+  
+  body {
+    color: var(--foreground);
+    background-color: transparent;
+    min-height: 100vh;
+    line-height: 1.6;
+    font-size: 14px;
+  }
+
+  /* ELEGANT TYPOGRAPHY */
+  h1, h2, h3, h4 {
+    color: #000000;
+    letter-spacing: -0.03em;
+  }
+
+  h1 {
+    font-size: clamp(2.5rem, 5vw, 4rem);
+    font-weight: 500;
+    line-height: 1.05;
+  }
+
+  h2 {
+    font-size: clamp(1.5rem, 3.5vw, 2.5rem);
+    font-weight: 500;
+  }
+
+  p {
+    color: var(--muted);
+    font-weight: 400;
+  }
+
+  .text-small {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+}
+
+/* PREMIUM SILVER GLASS BUTTONS */
+.btn-acherno, .btn-premium {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.875rem 1.75rem;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  color: #000000;
+  font-weight: 700;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  border-radius: 1rem;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow: 
+    0 4px 20px -1px rgba(0, 0, 0, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.btn-acherno:hover, .btn-premium:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.8);
+  box-shadow: 
+    0 20px 40px -4px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  transform: translateY(-2px);
+  color: #000;
+}
+
+.btn-acherno:active, .btn-premium:active {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(1px);
+}
+
+/* OUTLINE / GHOST SILVER BUTTON */
+.btn-acherno-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.875rem 1.75rem;
+  background-color: rgba(255,255,255,0.4);
+  backdrop-filter: blur(8px);
+  color: #111827;
+  font-weight: 600;
+  font-size: 0.875rem;
+  border-radius: 0.75rem;
+  transition: all 0.25s ease;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.btn-acherno-outline:hover {
+  background-color: rgba(255,255,255,0.8);
+  border-color: #FFFFFF;
+}
+
+/* SILVER FROSTED GLASS CARDS */
+.card-luxury, .card-premium, .glass-premium, .glass {
+  background: var(--card);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  padding: 2rem;
+  box-shadow: 
+    0 4px 24px -1px rgba(0, 0, 0, 0.02), 
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 rgba(255,255,255,0.6);
+  transition: all 0.3s ease;
+}
+
+.card-luxury:hover, .card-premium:hover, .glass-premium:hover {
+  box-shadow: 
+    0 12px 32px -4px rgba(0, 0, 0, 0.06), 
+    0 4px 8px rgba(0, 0, 0, 0.02),
+    inset 0 1px 0 rgba(255,255,255,0.8);
+  border-color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+/* LUXURY TABLE STYLING */
+.table-luxury {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.table-luxury th {
+  text-align: left;
+  padding: 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+  background: rgba(255,255,255,0.4);
+}
+
+.table-luxury td {
+  padding: 1.25rem 1rem;
+  border-bottom: 1px solid rgba(0,0,0,0.03);
+  color: #000000;
+  font-size: 0.875rem;
+}
+
+/* ACCENT ELEMENTS */
+.line-divider {
+  width: 4rem;
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, #4B5563, #D1D5DB);
+  margin-bottom: 1.5rem;
+}
+
+/* ENTRANCE ANIMATION */
+@keyframes enter-fade {
+  from { opacity: 0; transform: translateY(12px); filter: blur(4px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+.animate-enter {
+  animation: enter-fade 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* INPUT STYLING */
+input, textarea, select {
+  font-family: 'Inter', sans-serif;
+  background-color: rgba(255,255,255,0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid #D1D5DB;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  transition: all 0.2s ease;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.02);
+  color: #000000;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: #9CA3AF !important;
+  background-color: #FFFFFF;
+  box-shadow: 0 0 0 3px rgba(156, 163, 175, 0.2), inset 0 1px 2px rgba(0,0,0,0.02) !important;
+}
+
+/* APP-LEVEL BLUEPRINT THEME SCOPE */
+.app-blueprint {
+  background-color: #F1F5F9;
+  
+  .glass-cad {
+    background: rgba(255, 255, 255, 0.45);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: 
+      0 4px 24px -1px rgba(0, 0, 0, 0.03),
+      inset 0 1px 0 rgba(255,255,255,0.8);
+    border-radius: 1rem;
+  }
+
+  .btn-blueprint {
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(32px);
+    -webkit-backdrop-filter: blur(32px);
+    color: #0F172A;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    box-shadow: 
+      0 10px 40px -10px rgba(0, 0, 0, 0.1),
+      inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    
+    &:hover {
+      background: rgba(255, 255, 255, 0.95);
+      border-color: #FFFFFF;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.15);
+      transform: translateY(-3px) scale(1.02);
+    }
+    
+    &:active {
+      transform: translateY(1px) scale(0.98);
+    }
+  }
+
+  .metallic-sidebar {
+    background: var(--silver-metallic);
+    border-right: 1px solid rgba(0, 0, 0, 0.05);
+    box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.8);
+  }
+
+  .technical-label {
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: #64748B;
+  }
+
+  .blueprint-callout {
+    position: relative;
+    &::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 10px;
+      height: 10px;
+      border-top: 1px solid rgba(0, 0, 0, 0.1);
+      border-right: 1px solid rgba(0, 0, 0, 0.1);
+    }
+  }
+}
+
+/* UTILITIES */
+.app-shell-bg {
+  background-color: transparent;
+}

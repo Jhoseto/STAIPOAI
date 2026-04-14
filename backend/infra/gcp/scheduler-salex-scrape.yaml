@@ -1,0 +1,14 @@
+apiVersion: scheduler.cnrm.cloud.google.com/v1beta1
+kind: CloudSchedulerJob
+metadata:
+  name: salex-nightly-scrape
+spec:
+  description: Nightly Salex sync (03:00 Europe/Sofia)
+  schedule: "0 3 * * *"
+  timeZone: "Europe/Sofia"
+  httpTarget:
+    uri: "https://staipo-ai-data-xxxxx.a.run.app/v1/scrape/salex/run"
+    httpMethod: POST
+    oidcToken:
+      serviceAccountEmail: "scheduler-invoker@PROJECT_ID.iam.gserviceaccount.com"
+

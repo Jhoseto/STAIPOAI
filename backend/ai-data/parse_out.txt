@@ -1,0 +1,7 @@
+Pattern -DIGIT/$: 42
+Pattern -DIGIT/ (no end): 60
+Full URL with digit: 63
+
+First match href: /tools-box-700-700-00812560/0085sg.jpg;jsessionid=d_RCWxvT_udaPunOcK1ADE55bkO1FzhUXfwqk4u0.localhost
+Regex test: None
+Last chars of href: ['0x6c', '0x68', '0x6f', '0x73', '0x74']

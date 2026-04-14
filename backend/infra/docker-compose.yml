@@ -1,0 +1,15 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: staipo
+      POSTGRES_USER: staipo
+      POSTGRES_PASSWORD: staipo
+    ports:
+      - "5432:5432"
+    volumes:
+      - staipo_db:/var/lib/postgresql/data
+
+volumes:
+  staipo_db:
+
