@@ -9,8 +9,50 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
-const getBackendUrl = () =>
-  (process.env.AI_DATA_URL || "http://localhost:8000").trim().replace(/\/$/, "");
+function isLocalHost(host: string): boolean {
+  const normalized = (host || "").toLowerCase();
+  return normalized.includes("localhost") || normalized.includes("127.0.0.1");
+}
+
+function cleanUrl(value: string | undefined | null): string | null {
+  const trimmed = (value || "").trim().replace(/\/$/, "");
+  return trimmed ? trimmed : null;
+}
+
+function deriveCloudRunBackendUrl(req: NextRequest): string | null {
+  const host = req.headers.get("host") || req.nextUrl.host || "";
+  const match = host.match(/^[^.]+-(\d+\.[a-z0-9-]+)\.run\.app$/i);
+  if (!match) return null;
+  return `https://staipo-ai-data-${match[1]}.run.app`;
+}
+
+function getBackendUrls(req: NextRequest): string[] {
+  const host = req.headers.get("host") || req.nextUrl.host || "";
+  const local = isLocalHost(host);
+  const envUrls = [
+    cleanUrl(process.env.AI_DATA_URL),
+    cleanUrl(process.env.AI_DATA_URL_FALLBACK),
+    ...((process.env.AI_DATA_URLS || "")
+      .split(",")
+      .map(cleanUrl)
+      .filter((v): v is string => Boolean(v))),
+    cleanUrl(process.env.NEXT_PUBLIC_AI_DATA_URL),
+    deriveCloudRunBackendUrl(req),
+    local ? "http://localhost:8000" : null,
+  ].filter((v): v is string => Boolean(v));
+
+  const deduped: string[] = [];
+  for (const url of envUrls) {
+    const isLocalUrl = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(url);
+    if (!local && isLocalUrl) {
+      continue;
+    }
+    if (!deduped.includes(url)) {
+      deduped.push(url);
+    }
+  }
+  return deduped;
+}
 
 async function handler(
   req: NextRequest,
@@ -18,40 +60,51 @@ async function handler(
 ) {
   const { path } = await params;
   const backendPath = "/" + path.join("/");
-  const target = `${getBackendUrl()}${backendPath}`;
-
-  // Forward query string
-  const url = new URL(target);
-  req.nextUrl.searchParams.forEach((value, key) => {
-    url.searchParams.set(key, value);
-  });
-
   const isBodyMethod = !["GET", "HEAD"].includes(req.method);
   const contentType = req.headers.get("content-type") || "application/json";
+  const backendUrls = getBackendUrls(req);
+  const attempted: string[] = [];
 
-  try {
-    const upstream = await fetch(url.toString(), {
-      method: req.method,
-      headers: { "content-type": contentType },
-      body: isBodyMethod ? await req.arrayBuffer() : undefined,
-      // @ts-expect-error — Node.js fetch in Next.js standalone
-      duplex: isBodyMethod ? "half" : undefined,
-    });
+  const requestBody = isBodyMethod ? await req.arrayBuffer() : undefined;
 
-    const body = await upstream.arrayBuffer();
-    return new NextResponse(body, {
-      status: upstream.status,
-      headers: {
-        "content-type": upstream.headers.get("content-type") || "application/json",
-      },
+  for (const backendUrl of backendUrls) {
+    const target = `${backendUrl}${backendPath}`;
+    const url = new URL(target);
+    req.nextUrl.searchParams.forEach((value, key) => {
+      url.searchParams.set(key, value);
     });
-  } catch (err) {
-    console.error("[ai-proxy] upstream error:", err);
-    return NextResponse.json(
-      { error: "Backend unreachable", detail: String(err) },
-      { status: 502 }
-    );
+    attempted.push(url.toString());
+
+    try {
+      const upstream = await fetch(url.toString(), {
+        method: req.method,
+        headers: { "content-type": contentType },
+        body: requestBody ? requestBody.slice(0) : undefined,
+        // @ts-expect-error — Node.js fetch in Next.js standalone
+        duplex: isBodyMethod ? "half" : undefined,
+      });
+
+      const body = await upstream.arrayBuffer();
+      return new NextResponse(body, {
+        status: upstream.status,
+        headers: {
+          "content-type": upstream.headers.get("content-type") || "application/json",
+          "x-ai-upstream": backendUrl,
+        },
+      });
+    } catch (err) {
+      console.error("[ai-proxy] upstream error:", backendUrl, err);
+    }
   }
+
+  return NextResponse.json(
+    {
+      error: "Backend unreachable",
+      detail: "All configured backend targets failed",
+      attempted,
+    },
+    { status: 502 }
+  );
 }
 
 export const GET    = handler;

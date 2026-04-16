@@ -1,7 +1,7 @@
 const RAW_AI_BASE_URL =
   typeof window !== "undefined"
     ? "/api/ai" // client: runtime API-route proxy → reads AI_DATA_URL at request time
-    : (process.env.AI_DATA_URL || "http://localhost:8000"); // server: direct call
+    : (process.env.AI_DATA_URL || process.env.AI_DATA_URL_FALLBACK || process.env.NEXT_PUBLIC_AI_DATA_URL || "http://localhost:8000"); // server: direct call
 
 
 export const AI_BASE_URL = RAW_AI_BASE_URL.trim().replace(/\s+/g, "");
