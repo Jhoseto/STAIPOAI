@@ -5,19 +5,9 @@
 #   • staipo-ai-data  (FastAPI backend — backend/ai-data/)
 #   • staiposerver    (Next.js frontend — frontend/web/)
 #
-# AI_DATA_URL НЕ е нужен при build time — вземаме URL-а на
-# backend-а след deploy и го подаваме като runtime env var.
-#
-# ── Substitutions (Cloud Build → Triggers → Edit → Variables) ──
-#   _NEXT_PUBLIC_SUPABASE_URL      = https://cecqbovhzztprtscicxg.supabase.co
-#   _NEXT_PUBLIC_SUPABASE_ANON_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-#   _SUPABASE_URL                  = https://cecqbovhzztprtscicxg.supabase.co
-#   _SUPABASE_ANON_KEY             = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-#   _SUPABASE_SERVICE_ROLE_KEY     = eyJhbGciOiJIUzI1NiIsInR5cCI6InNlcnZpY2Vfcm9sZSJ9...
-#   _GEMINI_API_KEY                = AIzaSyA0JGrnUmXHH-Oa6_tQ_FgoGHrmedEaaDc
-#   _NEXTAUTH_SECRET               = <openssl rand -base64 32>
-#   _GOOGLE_CLIENT_ID              = 1083584564861-XXXXXXXXXXXXXXXXXX.apps.googleusercontent.com
-#   _GOOGLE_CLIENT_SECRET          = XXXXXXXXXXXXXXXXXXXXXXXXXXX
+# Всички ключове се задават в GCP Console:
+# Cloud Build → Triggers → Edit → Substitution variables
+# НЕ слагай реални ключове в този файл!
 ##############################################################
 
 substitutions:
