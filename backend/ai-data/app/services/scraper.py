@@ -455,11 +455,21 @@ class SalexScraper:
             self._sync_state(force=True)
 
         # Build preview diff vs current DB and insert into scrape_items
-        existing_rows = self.admin.table("catalog").select(
-            "id, name, type, category, brand, code, thicknessMm, priceEur, pricePerUnit, unit, sourceUrl, imageUrl"
-        ).execute().data or []
-        
-        existing_by_id = {str(r.get("id")): r for r in existing_rows if str(r.get("sourceUrl", "")).startswith(SALEX_BASE)}
+        all_existing = []
+        limit = 1000
+        offset = 0
+        while True:
+            res = self.admin.table("catalog").select(
+                "id, name, type, category, brand, code, thicknessMm, priceEur, pricePerUnit, unit, sourceUrl, imageUrl"
+            ).range(offset, offset + limit - 1).execute()
+            if not res.data:
+                break
+            all_existing.extend(res.data)
+            if len(res.data) < limit:
+                break
+            offset += limit
+
+        existing_by_id = {str(r.get("id")): r for r in all_existing if str(r.get("sourceUrl", "")).startswith(SALEX_BASE)}
         staged_by_id = self._staged_by_id
         
         new_count = 0

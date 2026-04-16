@@ -938,8 +938,19 @@ def search_catalog(q: str = "", limit: int = 20):
 
 @app.get("/v1/catalog")
 def get_all_catalog():
-  res = get_supabase_admin().table("catalog").select("*").order("name").execute()
-  return {"items": res.data}
+  admin = get_supabase_admin()
+  all_items = []
+  limit = 1000
+  offset = 0
+  while True:
+      res = admin.table("catalog").select("*").order("name").range(offset, offset + limit - 1).execute()
+      if not res.data:
+          break
+      all_items.extend(res.data)
+      if len(res.data) < limit:
+          break
+      offset += limit
+  return {"items": all_items}
 
 
 @app.get("/v1/salex/lookup")

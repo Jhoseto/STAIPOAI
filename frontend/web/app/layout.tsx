@@ -43,17 +43,18 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} ${inter.variable} ${playfair.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      <head>
-            <script
-              dangerouslySetInnerHTML={{
-                __html: `
-                  window.__ENV = {
-                    NEXT_PUBLIC_SUPABASE_URL: ${JSON.stringify(process.env["SUPABASE_URL"] || process.env["NEXT_PUBLIC_SUPABASE_URL"] || "")},
-                    NEXT_PUBLIC_SUPABASE_ANON_KEY: ${JSON.stringify(process.env["SUPABASE_ANON_KEY"] || process.env["NEXT_PUBLIC_SUPABASE_ANON_KEY"] || "")}
-                  };
-                `,
-              }}
-            />
+      <head suppressHydrationWarning>
+        <script
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.__ENV = {
+                NEXT_PUBLIC_SUPABASE_URL: ${JSON.stringify(process.env["SUPABASE_URL"] || process.env["NEXT_PUBLIC_SUPABASE_URL"] || "")},
+                NEXT_PUBLIC_SUPABASE_ANON_KEY: ${JSON.stringify(process.env["SUPABASE_ANON_KEY"] || process.env["NEXT_PUBLIC_SUPABASE_ANON_KEY"] || "")}
+              };
+            `,
+          }}
+        />
       </head>
       <body className="min-h-full flex flex-col">
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>

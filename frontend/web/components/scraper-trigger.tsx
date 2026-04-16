@@ -64,6 +64,31 @@ export function ScraperTrigger() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
 
+  // Derive filter options from catalog
+  const categories = useMemo(() => {
+    const cats = [...new Set(catalog
+      .map(item => item.category)
+      .filter((cat): cat is string => Boolean(cat))
+    )];
+    return cats.sort();
+  }, [catalog]);
+
+  const brands = useMemo(() => {
+    const brds = [...new Set(catalog
+      .map(item => item.brand)
+      .filter((br): br is string => Boolean(br))
+    )];
+    return brds.sort();
+  }, [catalog]);
+
+  const thicknesses = useMemo(() => {
+    const thks = [...new Set(catalog
+      .map(item => item.thicknessMm)
+      .filter((t): t is number => typeof t === 'number')
+    )];
+    return thks.sort((a, b) => a - b).map(t => t.toString());
+  }, [catalog]);
+
   const categoryProgressPct = status?.categories_discovered
     ? Math.min(100, Math.round((status.categories_processed / status.categories_discovered) * 100))
     : 0;
@@ -250,7 +275,9 @@ export function ScraperTrigger() {
     
     if (preview?.items) {
       for (const pi of preview.items) {
-        previewIds.add(pi.catalog_id || pi.id);
+        // If it's an update or delete, we track the catalog_id to avoid duplicates
+        const refId = pi.catalog_id || pi.id;
+        previewIds.add(refId);
         list.push(pi);
       }
     }
@@ -270,43 +297,28 @@ export function ScraperTrigger() {
     return list;
   }, [catalog, preview]);
 
-  // Extract unique categories and brands for dropdowns
-  const categories = useMemo(() => {
-    const set = new Set<string>();
-    mergedItems.forEach(item => {
-      if (item.payload.category) set.add(item.payload.category);
-    });
-    return Array.from(set).sort();
-  }, [mergedItems]);
-
-  const brands = useMemo(() => {
-    const set = new Set<string>();
-    mergedItems.forEach(item => {
-      if (item.payload.brand) set.add(item.payload.brand);
-    });
-    return Array.from(set).sort();
-  }, [mergedItems]);
-
-  const thicknesses = useMemo(() => {
-    const set = new Set<string>();
-    mergedItems.forEach(item => {
-      if (item.payload.thicknessMm) set.add(item.payload.thicknessMm.toString());
-    });
-    return Array.from(set).sort((a, b) => parseFloat(a) - parseFloat(b));
-  }, [mergedItems]);
-
   const sortedAndFilteredItems = useMemo(() => {
     let result = mergedItems.filter(item => {
+      // 1. Action Filter (Tabs)
       if (filterAction !== "all" && item.action !== filterAction) return false;
+      
+      // 2. Category Filter
       if (selectedCategory !== "all" && item.payload.category !== selectedCategory) return false;
+      
+      // 3. Brand Filter
       if (selectedBrand !== "all" && item.payload.brand !== selectedBrand) return false;
+      
+      // 4. Thickness Filter
       if (selectedThickness !== "all" && item.payload.thicknessMm?.toString() !== selectedThickness) return false;
       
+      // 5. Price Range Filter
       if (minPrice && (item.payload.priceEur || 0) < parseFloat(minPrice)) return false;
       if (maxPrice && (item.payload.priceEur || 0) > parseFloat(maxPrice)) return false;
       
+      // 6. Image Toggle
       if (onlyWithImages && !item.payload.imageUrl) return false;
 
+      // 7. Search Query
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
         const n = (item.payload.name || "").toLowerCase();
@@ -316,21 +328,38 @@ export function ScraperTrigger() {
       return true;
     });
 
+    // 8. Sorting
     if (sortConfig) {
       result.sort((a, b) => {
-        const aValue = sortConfig.key === 'name' ? (a.payload.name || '') :
-                      sortConfig.key === 'code' ? (a.payload.code || '') :
-                      sortConfig.key === 'category' ? (a.payload.category || '') :
-                      sortConfig.key === 'price' ? (a.payload.priceEur || 0) :
-                      sortConfig.key === 'brand' ? (a.payload.brand || '') :
-                      sortConfig.key === 'status' ? (a.action || '') : '';
-        
-        const bValue = sortConfig.key === 'name' ? (b.payload.name || '') :
-                      sortConfig.key === 'code' ? (b.payload.code || '') :
-                      sortConfig.key === 'category' ? (b.payload.category || '') :
-                      sortConfig.key === 'price' ? (b.payload.priceEur || 0) :
-                      sortConfig.key === 'brand' ? (b.payload.brand || '') :
-                      sortConfig.key === 'status' ? (b.action || '') : '';
+        let aValue: any = "";
+        let bValue: any = "";
+
+        switch (sortConfig.key) {
+          case 'name':
+            aValue = a.payload.name || "";
+            bValue = b.payload.name || "";
+            break;
+          case 'code':
+            aValue = a.payload.code || "";
+            bValue = b.payload.code || "";
+            break;
+          case 'category':
+            aValue = a.payload.category || "";
+            bValue = b.payload.category || "";
+            break;
+          case 'price':
+            aValue = a.payload.priceEur || 0;
+            bValue = b.payload.priceEur || 0;
+            break;
+          case 'brand':
+            aValue = a.payload.brand || "";
+            bValue = b.payload.brand || "";
+            break;
+          case 'status':
+            aValue = a.action || "";
+            bValue = b.action || "";
+            break;
+        }
 
         if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
         if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
@@ -347,6 +376,16 @@ export function ScraperTrigger() {
     const start = (currentPage - 1) * itemsPerPage;
     return sortedAndFilteredItems.slice(start, start + itemsPerPage);
   }, [sortedAndFilteredItems, currentPage, itemsPerPage]);
+
+  // Scroll to top of table when page changes
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const tableElement = document.getElementById("catalog-table-container");
+      if (tableElement) {
+        tableElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+  }, [currentPage]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -556,12 +595,12 @@ export function ScraperTrigger() {
                 </div>
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-3 items-end">
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 h-full">
                     <label className="text-[10px] uppercase font-bold text-muted-foreground ml-1">Категория</label>
                     <select 
                       value={selectedCategory}
                       onChange={(e) => setSelectedCategory(e.target.value)}
-                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring outline-none"
+                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring outline-none"
                     >
                       <option value="all">Всички категории</option>
                       {categories.map(cat => (
@@ -570,12 +609,12 @@ export function ScraperTrigger() {
                     </select>
                   </div>
 
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 h-full">
                     <label className="text-[10px] uppercase font-bold text-muted-foreground ml-1">Марка</label>
                     <select 
                       value={selectedBrand}
                       onChange={(e) => setSelectedBrand(e.target.value)}
-                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring outline-none"
+                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring outline-none"
                     >
                       <option value="all">Всички марки</option>
                       {brands.map(brand => (
@@ -584,12 +623,12 @@ export function ScraperTrigger() {
                     </select>
                   </div>
 
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 h-full">
                     <label className="text-[10px] uppercase font-bold text-muted-foreground ml-1">Дебелина</label>
                     <select 
                       value={selectedThickness}
                       onChange={(e) => setSelectedThickness(e.target.value)}
-                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring outline-none"
+                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring outline-none"
                     >
                       <option value="all">Всички дебелини</option>
                       {thicknesses.map(t => (
@@ -598,7 +637,7 @@ export function ScraperTrigger() {
                     </select>
                   </div>
 
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 h-full">
                     <label className="text-[10px] uppercase font-bold text-muted-foreground ml-1">Цена (€)</label>
                     <div className="flex items-center gap-1">
                       <input 
@@ -618,7 +657,7 @@ export function ScraperTrigger() {
                     </div>
                   </div>
 
-                  <div className="space-y-1.5 lg:col-span-2">
+                  <div className="space-y-1.5 h-full lg:col-span-2">
                     <label className="text-[10px] uppercase font-bold text-muted-foreground ml-1">Търсене</label>
                     <div className="relative">
                       <Search className="absolute left-2.5 top-3 h-4 w-4 text-muted-foreground" />
@@ -695,7 +734,7 @@ export function ScraperTrigger() {
                 )}
               </AnimatePresence>
 
-              <div className="rounded-xl border border-border/50 bg-background overflow-hidden w-full relative min-h-[400px]">
+              <div id="catalog-table-container" className="rounded-xl border border-border/50 bg-background overflow-hidden w-full relative min-h-[400px]">
                 {loadingCatalog && (
                   <div className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-sm z-10">
                     <RefreshCw className="w-6 h-6 animate-spin text-primary" />
@@ -845,18 +884,18 @@ export function ScraperTrigger() {
               {/* PAGINATION BAR */}
               <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 glass-premium rounded-xl border border-border/50">
                 <div className="text-sm text-muted-foreground">
-                  Показани <strong>{Math.min(sortedAndFilteredItems.length, (currentPage - 1) * itemsPerPage + 1)}-{Math.min(sortedAndFilteredItems.length, currentPage * itemsPerPage)}</strong> от <strong>{sortedAndFilteredItems.length}</strong> артикула
+                  Показани <strong>{sortedAndFilteredItems.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0} - {Math.min(sortedAndFilteredItems.length, currentPage * itemsPerPage)}</strong> от <strong>{sortedAndFilteredItems.length}</strong> артикула
                 </div>
                 
-                <div className="flex items-center gap-6">
+                <div className="flex flex-wrap items-center gap-4 sm:gap-6 justify-center">
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">Покажи:</span>
                     <select 
                       value={itemsPerPage} 
                       onChange={(e) => setItemsPerPage(parseInt(e.target.value))}
-                      className="h-8 rounded border border-input bg-background px-2 text-xs outline-none focus:ring-1 focus:ring-ring"
+                      className="h-10 rounded border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring cursor-pointer hover:bg-muted/50"
                     >
-                      {[25, 50, 100, 200, 500].map(val => (
+                      {[25, 50, 100, 200, 500, 1000].map(val => (
                         <option key={val} value={val}>{val}</option>
                       ))}
                     </select>
@@ -868,13 +907,25 @@ export function ScraperTrigger() {
                       size="icon" 
                       className="h-8 w-8" 
                       disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(1)}
+                      title="Първа страница"
+                    >
+                      <ChevronLeft className="w-4 h-4 mr-[-4px]" /><ChevronLeft className="w-4 h-4 ml-[-4px]" />
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      size="icon" 
+                      className="h-8 w-8" 
+                      disabled={currentPage === 1}
                       onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                     >
                       <ChevronLeft className="w-4 h-4" />
                     </Button>
-                    <div className="flex items-center px-3 text-sm font-medium">
+                    
+                    <div className="flex items-center px-4 py-1 rounded-md bg-muted/50 text-sm font-medium">
                       Страница {currentPage} от {totalPages || 1}
                     </div>
+
                     <Button 
                       variant="outline" 
                       size="icon" 
@@ -883,6 +934,16 @@ export function ScraperTrigger() {
                       onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                     >
                       <ChevronRight className="w-4 h-4" />
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      size="icon" 
+                      className="h-8 w-8" 
+                      disabled={currentPage === totalPages || totalPages === 0}
+                      onClick={() => setCurrentPage(totalPages)}
+                      title="Последна страница"
+                    >
+                      <ChevronRight className="w-4 h-4 mr-[-4px]" /><ChevronRight className="w-4 h-4 ml-[-4px]" />
                     </Button>
                   </div>
                 </div>
