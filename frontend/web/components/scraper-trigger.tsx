@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Database, Zap, RefreshCw, CheckCircle2, Image as ImageIcon, Search, ChevronLeft, ChevronRight, Download, Filter } from "lucide-react";
+import { Database, Zap, RefreshCw, CheckCircle2, Image as ImageIcon, Search, ChevronLeft, ChevronRight, Download, Filter, AlertCircle, Clock, BarChart3, Loader2, Square, TrendingUp, Plus, Trash2, Sparkles, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -59,6 +59,7 @@ export function ScraperTrigger() {
   const [maxPrice, setMaxPrice] = useState<string>("");
   const [onlyWithImages, setOnlyWithImages] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>({ key: 'name', direction: 'asc' });
+  const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -92,6 +93,31 @@ export function ScraperTrigger() {
   const categoryProgressPct = status?.categories_discovered
     ? Math.min(100, Math.round((status.categories_processed / status.categories_discovered) * 100))
     : 0;
+
+  // Calculate timing statistics for real-time display
+  const statistics = useMemo(() => {
+    if (!status || !busy) return null;
+    
+    const started = status.started_at ? new Date(status.started_at).getTime() : Date.now();
+    const now = Date.now();
+    const elapsed = Math.max((now - started) / 1000, 1); // seconds
+    const elapsedMin = Math.floor(elapsed / 60);
+    const elapsedSec = Math.floor(elapsed % 60);
+    
+    const itemsPerMin = status.items_processed > 0 ? Math.round((status.items_processed / elapsed) * 60) : 0;
+    const itemsRemaining = Math.max((status.categories_discovered || 0) - status.categories_processed, 0);
+    const estimatedMinRemaining = itemsRemaining > 0 && itemsPerMin > 0 
+      ? Math.ceil((itemsRemaining / itemsPerMin) * 60)
+      : 0;
+    
+    return {
+      elapsedMin,
+      elapsedSec,
+      itemsPerMin,
+      estimatedMinRemaining,
+      estimatedSecRemaining: estimatedMinRemaining * 60,
+    };
+  }, [status, busy]);
 
   // Load catalog on mount
   useEffect(() => {
@@ -155,6 +181,7 @@ export function ScraperTrigger() {
     setBusy(true);
     setStatus(null);
     setPreview(null);
+    setSelectedIds(new Set());
     try {
       const res = await fetch("/api/scrape/salex/run", { method: "POST" });
       if (!res.ok) {
@@ -165,6 +192,18 @@ export function ScraperTrigger() {
     } catch (e) {
       setBusy(false);
       toast.error("Грешка при стартиране", {
+        description: e instanceof Error ? e.message : "Неизвестна грешка"
+      });
+    }
+  }
+
+  async function stopScraper() {
+    try {
+      const res = await fetch("/api/scrape/salex/stop", { method: "POST" });
+      if (!res.ok) throw new Error("Failed to stop scraper");
+      toast.info("Синхронизацията е спрена");
+    } catch (e) {
+      toast.error("Грешка при спиране", {
         description: e instanceof Error ? e.message : "Неизвестна грешка"
       });
     }
@@ -493,40 +532,299 @@ export function ScraperTrigger() {
               exit={{ opacity: 0, height: 0 }}
               className="overflow-hidden"
             >
-              <div className="glass-premium rounded-xl p-6 border border-primary/20 bg-primary/5">
-                <div className="flex flex-col gap-4">
-                  {/* Status Header */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
+              <div className="glass-premium rounded-xl border border-primary/30 bg-gradient-to-br from-primary/10 via-background to-primary/5 overflow-hidden">
+                <div className="p-6 space-y-6">
+                  {/* Header with Status */}
+                  <div className="flex items-center justify-between flex-wrap gap-4">
+                    <div className="flex items-center gap-3 flex-1">
                       {status.is_running ? (
-                        <div className="relative flex h-3 w-3">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
-                        </div>
+                        <motion.div
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                        >
+                          <Loader2 className="w-5 h-5 text-primary" />
+                        </motion.div>
                       ) : (
                         status.error_message ? 
-                          <span className="text-red-500 font-bold px-2">X</span> :
-                          <CheckCircle2 className="w-5 h-5 text-green-500" />
+                          <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.2 }}>
+                            <AlertCircle className="w-5 h-5 text-rose-500" />
+                          </motion.div> :
+                          <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.2 }}>
+                            <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                          </motion.div>
                       )}
-                      <span className="font-medium text-sm">
-                        {status.is_running ? `В момента: ${status.current_category || "Инициализация"}` : 
-                         status.error_message ? "Грешка при синхронизация" : "Последна синхронизация завършена"}
-                      </span>
+                      <div className="flex-1">
+                        <div className="font-semibold text-base">
+                          {status.is_running ? `Обработка: ${status.current_category || "Инициализация"}` : 
+                           status.error_message ? "Грешка при синхронизация" : "Синхронизацията успешно завершена"}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {status.items_processed} артикула проверени · {status.unique_products_total} уникални продукта
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-xs text-muted-foreground">
-                      {status.items_processed} артикула проверени · {status.categories_processed}/{status.categories_discovered || "?"} категории
-                    </div>
+                    {status.is_running && (
+                      <Button 
+                        variant="destructive" 
+                        size="sm"
+                        onClick={stopScraper}
+                        className="gap-2 shadow-lg"
+                      >
+                        <Square className="w-4 h-4" /> Спри
+                      </Button>
+                    )}
                   </div>
 
+                  {/* Main Progress */}
                   {status.is_running && (
-                    <div className="h-1.5 w-full bg-primary/10 rounded-full overflow-hidden">
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="space-y-4"
+                    >
+                      <div className="flex justify-between items-end">
+                        <span className="text-sm font-semibold text-slate-700">Напредък на синхронизацията</span>
+                        <motion.span
+                          className="text-3xl font-bold text-slate-900"
+                          key={categoryProgressPct}
+                          initial={{ scale: 0.8 }}
+                          animate={{ scale: 1 }}
+                          transition={{ duration: 0.3 }}
+                        >
+                          {categoryProgressPct}<span className="text-lg">%</span>
+                        </motion.span>
+                      </div>
+                      <div className="relative h-4 w-full bg-slate-200/40 rounded-full overflow-hidden border border-slate-200/60 shadow-sm">
+                        <motion.div
+                          className="absolute inset-y-0 left-0 bg-gradient-to-r from-slate-600 via-slate-500 to-slate-400 rounded-full shadow-lg"
+                          initial={{ width: 0 }}
+                          animate={{ width: `${categoryProgressPct}%` }}
+                          transition={{ duration: 0.8, ease: "easeOut" }}
+                        />
+                        <motion.div
+                          className="absolute inset-y-0 left-0 bg-gradient-to-r from-transparent via-white/40 to-transparent"
+                          animate={{ x: ["-100%", "100%"] }}
+                          transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                          style={{ width: "40%" }}
+                        />
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* Stats Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    {/* Categories */}
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.1 }}
+                      className="relative p-4 rounded-2xl border border-slate-200/50 bg-slate-50/50 hover:bg-white hover:shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)] transition-all duration-500 group overflow-hidden"
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                      <div className="relative space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Категории</span>
+                          <div className="p-2 rounded-lg bg-blue-500/10 group-hover:bg-blue-500/15 transition-colors duration-300">
+                            <Database className="w-4 h-4 text-blue-600" />
+                          </div>
+                        </div>
+                        <motion.div
+                          className="text-2xl font-bold text-slate-900"
+                          key={`${status.categories_processed}/${status.categories_discovered}`}
+                          initial={{ scale: 0.8 }}
+                          animate={{ scale: 1 }}
+                          transition={{ duration: 0.3 }}
+                        >
+                          {status.categories_processed}/{status.categories_discovered}
+                        </motion.div>
+                        <div className="h-1.5 w-full bg-slate-200/40 rounded-full overflow-hidden">
+                          <motion.div
+                            className="h-full bg-gradient-to-r from-blue-500 to-blue-400"
+                            initial={{ width: 0 }}
+                            animate={{ width: `${status.categories_discovered > 0 ? (status.categories_processed / status.categories_discovered) * 100 : 0}%` }}
+                            transition={{ duration: 0.6 }}
+                          />
+                        </div>
+                      </div>
+                    </motion.div>
+
+                    {/* Items Processed */}
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.15 }}
+                      className="relative p-4 rounded-2xl border border-slate-200/50 bg-slate-50/50 hover:bg-white hover:shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)] transition-all duration-500 group overflow-hidden"
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                      <div className="relative space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Проверени</span>
+                          <div className="p-2 rounded-lg bg-emerald-500/10 group-hover:bg-emerald-500/15 transition-colors duration-300">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          </div>
+                        </div>
+                        <motion.div
+                          className="text-2xl font-bold text-slate-900"
+                          key={status.items_processed}
+                          initial={{ scale: 0.8 }}
+                          animate={{ scale: 1 }}
+                          transition={{ duration: 0.3 }}
+                        >
+                          {status.items_processed}
+                        </motion.div>
+                        <div className="text-xs text-slate-500">от {status.products_discovered_total}</div>
+                      </div>
+                    </motion.div>
+
+                    {/* Speed */}
+                    {statistics && (
                       <motion.div
-                        className="h-full bg-primary rounded-full"
-                        initial={{ width: 0 }}
-                        animate={{ width: `${categoryProgressPct}%` }}
-                        transition={{ duration: 0.5 }}
-                      />
-                    </div>
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.2 }}
+                        className="relative p-4 rounded-2xl border border-slate-200/50 bg-slate-50/50 hover:bg-white hover:shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)] transition-all duration-500 group overflow-hidden"
+                      >
+                        <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                        <div className="relative space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Скорост</span>
+                            <div className="p-2 rounded-lg bg-purple-500/10 group-hover:bg-purple-500/15 transition-colors duration-300">
+                              <TrendingUp className="w-4 h-4 text-purple-600" />
+                            </div>
+                          </div>
+                          <div className="text-2xl font-bold text-slate-900">
+                            {statistics.itemsPerMin}
+                            <span className="text-xs font-normal text-slate-500 ml-1">/мин</span>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {/* Time */}
+                    {statistics && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.25 }}
+                        className="relative p-4 rounded-2xl border border-slate-200/50 bg-slate-50/50 hover:bg-white hover:shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)] transition-all duration-500 group overflow-hidden"
+                      >
+                        <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                        <div className="relative space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Време</span>
+                            <div className="p-2 rounded-lg bg-amber-500/10 group-hover:bg-amber-500/15 transition-colors duration-300">
+                              <Clock className="w-4 h-4 text-amber-600" />
+                            </div>
+                          </div>
+                          <div className="text-2xl font-bold text-slate-900">
+                            {statistics.elapsedMin}:{String(statistics.elapsedSec).padStart(2, '0')}
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+
+                  {/* Estimated Time Remaining */}
+                  {status.is_running && statistics && statistics.estimatedMinRemaining > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="p-4 rounded-2xl bg-slate-50/50 border border-slate-200/50 hover:bg-white hover:shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)] transition-all duration-500"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="w-4 h-4 text-slate-600" />
+                          <span className="text-sm font-semibold text-slate-700">Прогноза време до завършване</span>
+                        </div>
+                        <motion.div
+                          className="text-lg font-bold text-slate-900"
+                          key={`${statistics.estimatedMinRemaining}:${statistics.estimatedSecRemaining}`}
+                          initial={{ scale: 0.8 }}
+                          animate={{ scale: 1 }}
+                          transition={{ duration: 0.3 }}
+                        >
+                          ~{statistics.estimatedMinRemaining}м {statistics.estimatedSecRemaining % 60}с
+                        </motion.div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* Summary Stats when finished */}
+                  {!status.is_running && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4 border-t border-slate-200/50"
+                    >
+                      <div className="relative p-4 rounded-2xl border border-slate-200/50 bg-slate-50/50 hover:bg-white hover:shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)] transition-all duration-500 group overflow-hidden text-center">
+                        <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                        <div className="relative space-y-2">
+                          <div className="flex items-center justify-center gap-1.5 mb-2">
+                            <Plus className="w-4 h-4 text-emerald-600" />
+                            <span className="text-xs font-semibold text-slate-600 uppercase">Нови</span>
+                          </div>
+                          <motion.div
+                            className="text-3xl font-bold text-slate-900"
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            transition={{ delay: 0.2 }}
+                          >
+                            {status.pending_new || 0}
+                          </motion.div>
+                        </div>
+                      </div>
+                      <div className="relative p-4 rounded-2xl border border-slate-200/50 bg-slate-50/50 hover:bg-white hover:shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)] transition-all duration-500 group overflow-hidden text-center">
+                        <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                        <div className="relative space-y-2">
+                          <div className="flex items-center justify-center gap-1.5 mb-2">
+                            <RefreshCw className="w-4 h-4 text-amber-600" />
+                            <span className="text-xs font-semibold text-slate-600 uppercase">Променени</span>
+                          </div>
+                          <motion.div
+                            className="text-3xl font-bold text-slate-900"
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            transition={{ delay: 0.25 }}
+                          >
+                            {status.pending_updated || 0}
+                          </motion.div>
+                        </div>
+                      </div>
+                      <div className="relative p-4 rounded-2xl border border-slate-200/50 bg-slate-50/50 hover:bg-white hover:shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)] transition-all duration-500 group overflow-hidden text-center">
+                        <div className="absolute inset-0 bg-gradient-to-br from-rose-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                        <div className="relative space-y-2">
+                          <div className="flex items-center justify-center gap-1.5 mb-2">
+                            <Trash2 className="w-4 h-4 text-rose-600" />
+                            <span className="text-xs font-semibold text-slate-600 uppercase">Липсващи</span>
+                          </div>
+                          <motion.div
+                            className="text-3xl font-bold text-slate-900"
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            transition={{ delay: 0.3 }}
+                          >
+                            {status.pending_missing || 0}
+                          </motion.div>
+                        </div>
+                      </div>
+                      <div className="relative p-4 rounded-2xl border border-slate-200/50 bg-slate-50/50 hover:bg-white hover:shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)] transition-all duration-500 group overflow-hidden text-center">
+                        <div className="absolute inset-0 bg-gradient-to-br from-slate-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                        <div className="relative space-y-2">
+                          <div className="flex items-center justify-center gap-1.5 mb-2">
+                            <BarChart3 className="w-4 h-4 text-slate-600" />
+                            <span className="text-xs font-semibold text-slate-600 uppercase">Всичко</span>
+                          </div>
+                          <motion.div
+                            className="text-3xl font-bold text-slate-900"
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            transition={{ delay: 0.35 }}
+                          >
+                            {status.unique_products_total || 0}
+                          </motion.div>
+                        </div>
+                      </div>
+                    </motion.div>
                   )}
                 </div>
               </div>
@@ -542,6 +840,50 @@ export function ScraperTrigger() {
               exit={{ opacity: 0, scale: 0.95 }}
               className="flex flex-col gap-4 w-full"
             >
+              {/* Show Preview Table if we have preview data, otherwise show catalog */}
+              {preview?.items && preview.items.length > 0 ? (
+                <>
+                  <div className="space-y-2 p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <div className="text-sm font-medium text-blue-900 dark:text-blue-100">Резултати от синхронизацията</div>
+                    <div className="text-xs text-blue-700 dark:text-blue-200">
+                      Откритите промени готови за преглед и запазване. Избери които искаш да приложиш.
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-4 glass-premium rounded-xl p-4 border border-border/50">
+                    <div className="space-y-3">
+                      <div className="text-sm font-medium">Бързи действия:</div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button 
+                          size="sm" 
+                          onClick={() => applyChanges({ applyNew: true, applyUpdated: true, deleteMissing: false, clearAfter: true })}
+                          disabled={applying}
+                          className="gap-2 bg-emerald-600 hover:bg-emerald-700"
+                        >
+                          <CheckCircle2 className="w-4 h-4" /> Приложи НА всички НОВИ и ПРОМЕНЕНИ
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          onClick={() => applyChanges({ applyNew: true, applyUpdated: true, deleteMissing: true, clearAfter: true })}
+                          disabled={applying}
+                          className="gap-2 bg-blue-600 hover:bg-blue-700"
+                        >
+                          <CheckCircle2 className="w-4 h-4" /> Приложи ВСЕ (с намаляне)
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          onClick={() => setPreview(null)}
+                          disabled={applying}
+                        >
+                          Отмени
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : null}
+
               <div className="flex flex-col gap-4 glass-premium rounded-xl p-4 border border-border/50">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div className="flex flex-wrap items-center gap-2">
@@ -594,7 +936,8 @@ export function ScraperTrigger() {
                   </div>
                 </div>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-3 items-end">
+                {(!preview?.items || preview.items.length === 0) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-3 items-end">
                   <div className="space-y-1.5 h-full">
                     <label className="text-[10px] uppercase font-bold text-muted-foreground ml-1">Категория</label>
                     <select 
@@ -671,6 +1014,7 @@ export function ScraperTrigger() {
                     </div>
                   </div>
                 </div>
+                )}
 
                 <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/20">
                   <div className="flex items-center gap-4">
@@ -788,18 +1132,42 @@ export function ScraperTrigger() {
                           const idx = (currentPage - 1) * itemsPerPage + localIdx;
                           const isChange = item.action !== "existing";
                           const isSelected = selectedIds.has(item.id);
+                          const isExpanded = expandedItemId === item.id;
+                          const canExpand = item.action === "update";
+                          
+                          // Get existing catalog item for comparison
+                          const existingItem = item.catalog_id ? catalog.find(c => c.id === item.catalog_id) : null;
+                          
+                          // Build list of changed fields
+                          const changedFields: Array<{ label: string; oldVal: any; newVal: any }> = [];
+                          if (existingItem && item.action === "update") {
+                            const newPayload = item.payload;
+                            // Compare key fields
+                            if (newPayload.name !== existingItem.name) changedFields.push({ label: "Име", oldVal: existingItem.name, newVal: newPayload.name });
+                            if (newPayload.code !== existingItem.code) changedFields.push({ label: "Код", oldVal: existingItem.code, newVal: newPayload.code });
+                            if (newPayload.category !== existingItem.category) changedFields.push({ label: "Категория", oldVal: existingItem.category, newVal: newPayload.category });
+                            if (newPayload.brand !== existingItem.brand) changedFields.push({ label: "Марка", oldVal: existingItem.brand, newVal: newPayload.brand });
+                            if (newPayload.thicknessMm !== existingItem.thicknessMm) changedFields.push({ label: "Дебелина", oldVal: existingItem.thicknessMm ? `${existingItem.thicknessMm} мм` : null, newVal: newPayload.thicknessMm ? `${newPayload.thicknessMm} мм` : null });
+                            if (newPayload.priceEur !== existingItem.priceEur) changedFields.push({ label: "Цена", oldVal: existingItem.priceEur ? `${existingItem.priceEur.toFixed(2)} EUR` : null, newVal: newPayload.priceEur ? `${newPayload.priceEur.toFixed(2)} EUR` : null });
+                            if (newPayload.unit !== existingItem.unit) changedFields.push({ label: "Мерна единица", oldVal: existingItem.unit, newVal: newPayload.unit });
+                            if (newPayload.imageUrl !== existingItem.imageUrl) changedFields.push({ label: "Картина", oldVal: existingItem.imageUrl ? "✓" : "—", newVal: newPayload.imageUrl ? "✓" : "—" });
+                          }
                           
                           return (
-                            <tr 
-                              key={item.id} 
-                              className={`border-b border-border/10 hover:bg-muted/30 transition-colors ${isSelected ? 'bg-primary/5' : ''} ${!isChange ? 'opacity-80' : ''}`}
-                              onClick={() => {
-                                if (isChange) toggleSelection(item.id);
-                              }}
-                            >
-                              <td className="px-4 py-3 text-center" onClick={e => {
+                            <React.Fragment key={item.id}>
+                              <tr 
+                                className={`border-b border-border/10 hover:bg-muted/30 transition-colors cursor-${canExpand ? 'pointer' : 'default'} ${isSelected ? 'bg-primary/5' : ''} ${!isChange ? 'opacity-80' : ''}`}
+                                onClick={() => {
+                                  if (canExpand) setExpandedItemId(isExpanded ? null : item.id);
+                                  else if (isChange) toggleSelection(item.id);
+                                }}
+                              >
+                              <td className="px-4 py-3 text-center flex items-center gap-2 justify-center" onClick={e => {
                                 if (isChange) e.stopPropagation();
                               }}>
+                                {canExpand && (
+                                  <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                                )}
                                 {isChange && (
                                   <Checkbox 
                                     checked={isSelected}
@@ -873,6 +1241,34 @@ export function ScraperTrigger() {
                                 )}
                               </td>
                             </tr>
+                            
+                            {/* Detail row for expanded update items */}
+                            {isExpanded && canExpand && changedFields.length > 0 && (
+                              <tr className="border-b border-border/5 bg-slate-50/30 hover:bg-slate-50/50 transition-colors">
+                                <td colSpan={11} className="px-4 py-4">
+                                  <div className="space-y-3">
+                                    <div className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Променени полета:</div>
+                                    <div className="grid gap-2">
+                                      {changedFields.map((field, idx) => (
+                                        <div key={idx} className="flex items-center justify-between text-sm bg-white/50 px-3 py-2 rounded border border-border/10 hover:bg-white/80 transition-colors">
+                                          <span className="font-medium text-slate-700 min-w-[120px]">{field.label}:</span>
+                                          <div className="flex items-center gap-2 flex-1 ml-4">
+                                            <span className="line-through text-rose-500 opacity-75">
+                                              {field.oldVal !== null ? String(field.oldVal) : "—"}
+                                            </span>
+                                            <span className="text-slate-400">→</span>
+                                            <span className="font-semibold text-emerald-600">
+                                              {field.newVal !== null ? String(field.newVal) : "—"}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                           );
                         })
                       )}
