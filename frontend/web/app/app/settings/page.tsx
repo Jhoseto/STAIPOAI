@@ -4,7 +4,7 @@ import { ScraperTrigger } from "@/components/scraper-trigger";
 
 export default async function SettingsPage() {
   return (
-    <div className="max-w-5xl space-y-10">
+    <div className="w-full space-y-10 px-4 md:px-8 max-w-full">
       <div className="pb-6 border-b border-gray-200">
         <div className="line-divider" />
         <span className="text-small">Конфигурация</span>
@@ -14,7 +14,7 @@ export default async function SettingsPage() {
         </p>
       </div>
       
-      <div className="card-luxury p-8">
+      <div className="card-luxury p-4 md:p-8 w-full max-w-full overflow-x-hidden">
         <ScraperTrigger />
       </div>
 

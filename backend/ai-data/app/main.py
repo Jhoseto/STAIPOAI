@@ -33,16 +33,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class ScraperStatus(BaseModel):
-    is_running: bool = False
-    current_category: str | None = None
-    items_added: int = 0
-    items_processed: int = 0
-    last_item_name: str | None = None
-    started_at: str | None = None
-    finished_at: str | None = None
-
-SCRAPER_STATE = ScraperStatus()
 
 from .services.resolved_table import build_resolved_pricing_table, resolve_row_from_salex
 from .supabase_client import (
@@ -53,7 +43,7 @@ from .supabase_client import (
   ensure_bucket_exists,
 )
 from .services.embeddings import get_embedding
-from .services.scraper import run_full_scrape, run_full_scrape_with_state
+from .services.scraper import run_full_scrape, get_sync_preview, apply_sync_actions
 from .services.pdf_generator import generate_offer_pdf
 
 app = FastAPI(title="STAIPO AI Data Service", version="0.2.0")
@@ -477,8 +467,7 @@ def _extract_possible_sizes(text: str) -> list[str]:
     r"\b\d{2,4}\s*[xх*]\s*\d{2,4}(?:\s*[xх*]\s*\d{1,3})?\s*мм?\b",
     r"\b\d{2,4}\s*[xх*]\s*\d{2,4}(?:\s*[xх*]\s*\d{1,3})?\s*cm\b",
     r"\b\d{2,4}\s*[xх*]\s*\d{2,4}(?:\s*[xх*]\s*\d{1,3})?\b",
-    r"\bдебелина\s*\d{1,3}\s*мм\b",
-    r"\bthickness\s*\d{1,3}\s*mm\b",
+    r"\b([A-Z0-9]{4,})\b",
   ]
   for pattern in patterns:
     for m in re.finditer(pattern, clean, re.IGNORECASE):
@@ -643,7 +632,7 @@ async def _salex_lookup_by_code(code: str, material_hint: str | None = None) -> 
         "sourceUrl": url,
         "code": code_found,
         "name": title or code_found,
-        "priceEur": price_eur,
+        "priceEur": round(price_bgn / 1.95583, 2),
         "sizes": sizes,
         "imageUrl": image,
         "score": round(score, 2),
@@ -669,6 +658,8 @@ async def _salex_lookup_by_code(code: str, material_hint: str | None = None) -> 
         exact_found = True
   if best and exact_found and best.get("exactMatch"):
     return best
+
+  gemini_pick = await _gemini_salex_pick(code, material_hint, gemini_candidates)
 
   # Gemini-first fallback: choose best product and extract normalized fields.
   if gemini_pick:
@@ -943,6 +934,11 @@ def search_catalog(q: str = "", limit: int = 20):
   if ql:
     query = query.ilike("name", f"%{ql}%")
   res = query.limit(limit).execute()
+  return {"items": res.data}
+
+@app.get("/v1/catalog")
+def get_all_catalog():
+  res = get_supabase_admin().table("catalog").select("*").order("name").execute()
   return {"items": res.data}
 
 
@@ -2383,22 +2379,96 @@ async def reindex_catalog():
 
 @app.post("/v1/scrape/salex/run")
 async def scrape_salex(background_tasks: BackgroundTasks):
-  if SCRAPER_STATE.is_running:
-    return {"ok": False, "message": "Scraper-ът вече работи."}
+  admin = get_supabase_admin()
   
-  SCRAPER_STATE.is_running = True
-  SCRAPER_STATE.items_added = 0
-  SCRAPER_STATE.items_processed = 0
-  SCRAPER_STATE.current_category = "all"
-  SCRAPER_STATE.last_item_name = None
-  SCRAPER_STATE.started_at = datetime.now(timezone.utc).isoformat()
-  SCRAPER_STATE.finished_at = None
+  # Check if a run is already active
+  active = admin.table("scrape_runs").select("id").eq("status", "running").execute()
+  if active.data:
+      return {"ok": False, "message": "Scraper-ът вече работи.", "run_id": active.data[0]["id"]}
 
-  background_tasks.add_task(run_full_scrape_with_state, SCRAPER_STATE)
-  return {"ok": True, "message": "Scraper-ът е стартиран."}
+  # Create new run
+  new_run = admin.table("scrape_runs").insert({
+      "status": "running",
+      "current_category": "Инициализация"
+  }).execute()
+  
+  if not new_run.data:
+      return {"ok": False, "message": "Неуспешно създаване на run."}
+      
+  run_id = new_run.data[0]["id"]
+
+  background_tasks.add_task(run_full_scrape, run_id)
+  return {"ok": True, "message": "Scraper-ът е стартиран.", "run_id": run_id}
 
 
 @app.get("/v1/scrape/salex/status")
 async def get_scrape_status():
-  return SCRAPER_STATE
+  admin = get_supabase_admin()
+  # Look for running first
+  res = admin.table("scrape_runs").select("*").eq("status", "running").order("created_at", desc=True).limit(1).execute()
+  
+  if not res.data:
+      # If none running, return the latest one
+      res = admin.table("scrape_runs").select("*").order("created_at", desc=True).limit(1).execute()
+      
+  if not res.data:
+      return {
+          "is_running": False,
+          "run_id": None,
+      }
+      
+  run = res.data[0]
+  is_running = run.get("status") == "running"
+  
+  return {
+      "is_running": is_running,
+      "run_id": run.get("id"),
+      "current_category": run.get("current_category"),
+      "items_added": run.get("items_added") or 0,
+      "items_processed": run.get("items_processed") or 0,
+      "categories_discovered": run.get("categories_discovered") or 0,
+      "categories_processed": run.get("categories_processed") or 0,
+      "products_discovered_total": run.get("products_discovered_total") or 0,
+      "unique_products_total": run.get("unique_products_total") or 0,
+      "pending_new": run.get("pending_new") or 0,
+      "pending_updated": run.get("pending_updated") or 0,
+      "pending_missing": run.get("pending_missing") or 0,
+      "last_item_name": run.get("last_item_name"),
+      "started_at": run.get("created_at"),
+      "finished_at": run.get("finished_at"),
+      "error_message": run.get("error_message")
+  }
+
+
+@app.get("/v1/scrape/salex/preview")
+async def scrape_salex_preview(run_id: str | None = None):
+  if not run_id:
+      return {"ok": False, "message": "Missing run_id"}
+  return get_sync_preview(run_id)
+
+
+class ScrapeApplyIn(BaseModel):
+  runId: str
+  selectedIds: list[str] | None = None
+  clearAfter: bool = False
+
+@app.post("/v1/scrape/salex/apply")
+async def scrape_salex_apply(payload: ScrapeApplyIn):
+  return await apply_sync_actions(
+    run_id=payload.runId,
+    selected_ids=payload.selectedIds,
+    clear_after=payload.clearAfter,
+  )
+
+
+class ScrapeCommitIn(BaseModel):
+  runId: str
+
+@app.post("/v1/scrape/salex/commit")
+async def scrape_salex_commit(payload: ScrapeCommitIn):
+  return await apply_sync_actions(
+    run_id=payload.runId,
+    selected_ids=None,
+    clear_after=True,
+  )
 

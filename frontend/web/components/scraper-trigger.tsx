@@ -1,24 +1,90 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
-import { Database, Zap, RefreshCw, CheckCircle2, AlertCircle } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Database, Zap, RefreshCw, CheckCircle2, Image as ImageIcon, Search, ChevronLeft, ChevronRight, Download, Filter } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 
 type ScraperStatus = {
   is_running: boolean;
   current_category: string | null;
+  run_id?: string | null;
   items_added: number;
   items_processed: number;
+  categories_discovered: number;
+  categories_processed: number;
+  products_discovered_total: number;
+  unique_products_total: number;
+  pending_new?: number;
+  pending_updated?: number;
+  pending_missing?: number;
   last_item_name: string | null;
   started_at: string | null;
   finished_at: string | null;
+  error_message?: string;
+};
+
+type ScrapeItem = {
+  id: string;
+  action: "insert" | "update" | "delete" | "existing";
+  catalog_id: string | null;
+  payload: any;
+};
+
+type SyncPreview = {
+  ok: boolean;
+  runId?: string;
+  counts?: { new: number; updated: number; missing: number; unchanged: number };
+  items?: ScrapeItem[];
 };
 
 export function ScraperTrigger() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<ScraperStatus | null>(null);
+  const [preview, setPreview] = useState<SyncPreview | null>(null);
+  const [catalog, setCatalog] = useState<any[]>([]);
+  const [loadingCatalog, setLoadingCatalog] = useState(true);
+  const [applying, setApplying] = useState(false);
+  
+  // Table state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [filterAction, setFilterAction] = useState<"all" | "existing" | "insert" | "update" | "delete">("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [selectedBrand, setSelectedBrand] = useState<string>("all");
+  const [selectedThickness, setSelectedThickness] = useState<string>("all");
+  const [minPrice, setMinPrice] = useState<string>("");
+  const [maxPrice, setMaxPrice] = useState<string>("");
+  const [onlyWithImages, setOnlyWithImages] = useState(false);
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>({ key: 'name', direction: 'asc' });
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
+
+  const categoryProgressPct = status?.categories_discovered
+    ? Math.min(100, Math.round((status.categories_processed / status.categories_discovered) * 100))
+    : 0;
+
+  // Load catalog on mount
+  useEffect(() => {
+    async function loadCatalog() {
+      try {
+        const res = await fetch("/api/catalog");
+        if (res.ok) {
+          const data = await res.json();
+          setCatalog(data.items || []);
+        }
+      } catch (e) {
+        console.error("Failed to load catalog", e);
+      } finally {
+        setLoadingCatalog(false);
+      }
+    }
+    loadCatalog();
+  }, []);
 
   // Poll status while busy
   useEffect(() => {
@@ -31,9 +97,21 @@ export function ScraperTrigger() {
           if (res.ok) {
             const data = await res.json();
             setStatus(data);
+            
+            // Check if status in DB says it's failed (we don't have explicit status enum exported, but we can check error_message or if it stopped running but has an error)
             if (!data.is_running && busy) {
               setBusy(false);
-              toast.success("Синхронизацията завърши!");
+              if (data.error_message) {
+                toast.error("Грешка при синхронизация", { description: data.error_message });
+              } else {
+                toast.success("Синхронизацията завърши!");
+              }
+            }
+            if (!data.is_running && data.run_id && !data.error_message) {
+              const p = await fetch(`/api/scrape/salex/preview?run_id=${encodeURIComponent(data.run_id)}`);
+              if (p.ok) {
+                setPreview(await p.json());
+              }
             }
           }
         } catch (e) {
@@ -51,6 +129,7 @@ export function ScraperTrigger() {
     console.log("Starting scraper sync...");
     setBusy(true);
     setStatus(null);
+    setPreview(null);
     try {
       const res = await fetch("/api/scrape/salex/run", { method: "POST" });
       if (!res.ok) {
@@ -66,9 +145,285 @@ export function ScraperTrigger() {
     }
   }
 
+  async function applyChanges(opts: { applyNew: boolean; applyUpdated: boolean; deleteMissing: boolean; clearAfter?: boolean }) {
+    if (!status?.run_id) return;
+    setApplying(true);
+    try {
+      const res = await fetch("/api/scrape/salex/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: status.run_id,
+          selectedIds: selectedIds.size > 0 ? Array.from(selectedIds) : null, // null means apply all requested
+          clearAfter: Boolean(opts.clearAfter),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.ok) throw new Error(JSON.stringify(data));
+      toast.success(`Приложено: +${data.inserted} / обновени ${data.updated} / изтрити ${data.deleted}`);
+      
+      // Refresh catalog after apply
+      const c = await fetch("/api/catalog");
+      if (c.ok) setCatalog((await c.json()).items || []);
+
+      if (opts.clearAfter) {
+        setPreview(null);
+        setSelectedIds(new Set());
+      } else {
+        const p = await fetch(`/api/scrape/salex/preview?run_id=${encodeURIComponent(status.run_id)}`);
+        if (p.ok) setPreview(await p.json());
+      }
+    } catch (e) {
+      toast.error("Грешка при прилагане", { description: e instanceof Error ? e.message : "Неизвестна грешка" });
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  async function applySelected() {
+    if (!status?.run_id || selectedIds.size === 0) return;
+    setApplying(true);
+    try {
+      const res = await fetch("/api/scrape/salex/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: status.run_id,
+          selectedIds: Array.from(selectedIds),
+          clearAfter: false,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.ok) throw new Error(JSON.stringify(data));
+      toast.success(`Успешно обработени ${selectedIds.size} записа: +${data.inserted} / обновени ${data.updated} / изтрити ${data.deleted}`);
+      
+      // Refresh catalog after apply
+      const c = await fetch("/api/catalog");
+      if (c.ok) setCatalog((await c.json()).items || []);
+
+      // Refresh preview to remove applied items
+      const p = await fetch(`/api/scrape/salex/preview?run_id=${encodeURIComponent(status.run_id)}`);
+      if (p.ok) setPreview(await p.json());
+      setSelectedIds(new Set());
+    } catch (e) {
+      toast.error("Грешка при прилагане", { description: e instanceof Error ? e.message : "Неизвестна грешка" });
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  async function commitAll() {
+    if (!status?.run_id) return;
+    setApplying(true);
+    try {
+      const res = await fetch("/api/scrape/salex/commit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId: status.run_id }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.ok) throw new Error(JSON.stringify(data));
+      toast.success("Всички промени са приложени и списъкът е изчистен.");
+      
+      // Refresh catalog after apply
+      const c = await fetch("/api/catalog");
+      if (c.ok) setCatalog((await c.json()).items || []);
+
+      setPreview(null);
+      setSelectedIds(new Set());
+    } catch (e) {
+      toast.error("Грешка при запис", { description: e instanceof Error ? e.message : "Неизвестна грешка" });
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  // Merge catalog with preview
+  const mergedItems = useMemo(() => {
+    const list: ScrapeItem[] = [];
+    
+    // Create a map of catalog items
+    const catalogMap = new Map(catalog.map(c => [c.id, c]));
+    
+    // Add preview items (these override or delete catalog items)
+    const previewIds = new Set<string>();
+    
+    if (preview?.items) {
+      for (const pi of preview.items) {
+        previewIds.add(pi.catalog_id || pi.id);
+        list.push(pi);
+      }
+    }
+    
+    // Add existing catalog items that are not modified/deleted by the preview
+    for (const cat of catalog) {
+      if (!previewIds.has(cat.id)) {
+        list.push({
+          id: cat.id,
+          action: "existing",
+          catalog_id: cat.id,
+          payload: cat
+        } as any);
+      }
+    }
+    
+    return list;
+  }, [catalog, preview]);
+
+  // Extract unique categories and brands for dropdowns
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    mergedItems.forEach(item => {
+      if (item.payload.category) set.add(item.payload.category);
+    });
+    return Array.from(set).sort();
+  }, [mergedItems]);
+
+  const brands = useMemo(() => {
+    const set = new Set<string>();
+    mergedItems.forEach(item => {
+      if (item.payload.brand) set.add(item.payload.brand);
+    });
+    return Array.from(set).sort();
+  }, [mergedItems]);
+
+  const thicknesses = useMemo(() => {
+    const set = new Set<string>();
+    mergedItems.forEach(item => {
+      if (item.payload.thicknessMm) set.add(item.payload.thicknessMm.toString());
+    });
+    return Array.from(set).sort((a, b) => parseFloat(a) - parseFloat(b));
+  }, [mergedItems]);
+
+  const sortedAndFilteredItems = useMemo(() => {
+    let result = mergedItems.filter(item => {
+      if (filterAction !== "all" && item.action !== filterAction) return false;
+      if (selectedCategory !== "all" && item.payload.category !== selectedCategory) return false;
+      if (selectedBrand !== "all" && item.payload.brand !== selectedBrand) return false;
+      if (selectedThickness !== "all" && item.payload.thicknessMm?.toString() !== selectedThickness) return false;
+      
+      if (minPrice && (item.payload.priceEur || 0) < parseFloat(minPrice)) return false;
+      if (maxPrice && (item.payload.priceEur || 0) > parseFloat(maxPrice)) return false;
+      
+      if (onlyWithImages && !item.payload.imageUrl) return false;
+
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        const n = (item.payload.name || "").toLowerCase();
+        const c = (item.payload.code || "").toLowerCase();
+        if (!n.includes(q) && !c.includes(q)) return false;
+      }
+      return true;
+    });
+
+    if (sortConfig) {
+      result.sort((a, b) => {
+        const aValue = sortConfig.key === 'name' ? (a.payload.name || '') :
+                      sortConfig.key === 'code' ? (a.payload.code || '') :
+                      sortConfig.key === 'category' ? (a.payload.category || '') :
+                      sortConfig.key === 'price' ? (a.payload.priceEur || 0) :
+                      sortConfig.key === 'brand' ? (a.payload.brand || '') :
+                      sortConfig.key === 'status' ? (a.action || '') : '';
+        
+        const bValue = sortConfig.key === 'name' ? (b.payload.name || '') :
+                      sortConfig.key === 'code' ? (b.payload.code || '') :
+                      sortConfig.key === 'category' ? (b.payload.category || '') :
+                      sortConfig.key === 'price' ? (b.payload.priceEur || 0) :
+                      sortConfig.key === 'brand' ? (b.payload.brand || '') :
+                      sortConfig.key === 'status' ? (b.action || '') : '';
+
+        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+    
+    return result;
+  }, [mergedItems, filterAction, searchQuery, sortConfig, selectedCategory, selectedBrand, selectedThickness, minPrice, maxPrice, onlyWithImages]);
+
+  // Pagination logic
+  const totalPages = Math.ceil(sortedAndFilteredItems.length / itemsPerPage);
+  const paginatedItems = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return sortedAndFilteredItems.slice(start, start + itemsPerPage);
+  }, [sortedAndFilteredItems, currentPage, itemsPerPage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterAction, searchQuery, selectedCategory, selectedBrand, selectedThickness, minPrice, maxPrice, onlyWithImages, itemsPerPage]);
+
+  const exportToCSV = () => {
+    const headers = ["#,Име,Код,Категория,Дебелина,Цена (EUR),Марка,Статус,URL"];
+    const rows = sortedAndFilteredItems.map((item, idx) => [
+      idx + 1,
+      `"${item.payload.name?.replace(/"/g, '""')}"`,
+      `"${item.payload.code}"`,
+      `"${item.payload.category}"`,
+      item.payload.thicknessMm || "",
+      item.payload.priceEur || "",
+      `"${item.payload.brand}"`,
+      item.action,
+      item.payload.sourceUrl || ""
+    ].join(","));
+    
+    const csvContent = "\uFEFF" + headers.concat(rows).join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `staipo_catalog_export_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleSort = (key: string) => {
+    setSortConfig(current => {
+      if (current?.key === key) {
+        return { key, direction: current.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, direction: 'asc' };
+    });
+  };
+
+  const toggleSelection = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllFiltered = () => {
+    // Only allow selecting items that are actually changes (not existing)
+    const selectable = sortedAndFilteredItems.filter(i => i.action !== "existing");
+    if (selectable.length === 0) return;
+
+    // Check if all selectable are already selected
+    const allSelected = selectable.every(i => selectedIds.has(i.id));
+
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(selectable.map(i => i.id)));
+    }
+  };
+
+  const resetFilters = () => {
+    setFilterAction("all");
+    setSelectedCategory("all");
+    setSelectedBrand("all");
+    setSelectedThickness("all");
+    setMinPrice("");
+    setMaxPrice("");
+    setOnlyWithImages(false);
+    setSearchQuery("");
+  };
+
   return (
-    <div className="mt-8 pt-8 border-t border-border/40">
-      <div className="flex flex-col gap-8">
+    <div className="mt-8 pt-8 border-t border-border/40 w-full">
+      <div className="flex flex-col gap-8 w-full">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-primary text-xs font-medium uppercase tracking-widest">
@@ -77,7 +432,7 @@ export function ScraperTrigger() {
             </div>
             <h3 className="text-xl font-semibold">Синхронизация със Salex</h3>
             <p className="text-sm text-muted-foreground font-light max-w-md">
-              Обновете локалния си каталог с актуални цени и наличности директно от Salex.bg. Процесът отнема няколко минути.
+              Обновете каталога в базата данни с актуални цени и наличности директно от Salex.bg. Процесът отнема няколко минути.
             </p>
           </div>
           
@@ -110,44 +465,426 @@ export function ScraperTrigger() {
                           <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
                         </div>
                       ) : (
-                        <CheckCircle2 className="w-5 h-5 text-green-500" />
+                        status.error_message ? 
+                          <span className="text-red-500 font-bold px-2">X</span> :
+                          <CheckCircle2 className="w-5 h-5 text-green-500" />
                       )}
                       <span className="font-medium text-sm">
-                        {status.is_running ? `В момента: ${status.current_category || "Инициализация"}` : "Последна синхронизация завършена"}
+                        {status.is_running ? `В момента: ${status.current_category || "Инициализация"}` : 
+                         status.error_message ? "Грешка при синхронизация" : "Последна синхронизация завършена"}
                       </span>
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {status.items_processed} артикула проверени
+                      {status.items_processed} артикула проверени · {status.categories_processed}/{status.categories_discovered || "?"} категории
                     </div>
                   </div>
 
-                  {/* Progress Info */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    <div className="p-3 rounded-lg bg-background/40 border border-border/40">
-                      <div className="text-[10px] uppercase text-muted-foreground mb-1">Добавени нови</div>
-                      <div className="text-lg font-bold text-primary">{status.items_added}</div>
-                    </div>
-                    <div className="p-3 rounded-lg bg-background/40 border border-border/40">
-                      <div className="text-[10px] uppercase text-muted-foreground mb-1">Проверени общо</div>
-                      <div className="text-lg font-bold">{status.items_processed}</div>
-                    </div>
-                    <div className="col-span-2 p-3 rounded-lg bg-background/40 border border-border/40">
-                      <div className="text-[10px] uppercase text-muted-foreground mb-1">Последно намерен</div>
-                      <div className="text-sm font-medium truncate">{status.last_item_name || "—"}</div>
-                    </div>
-                  </div>
-
-                  {/* Progress Bar (Simulated or based on expectation if we knew total) */}
                   {status.is_running && (
-                    <div className="w-full bg-border/40 rounded-full h-1.5 overflow-hidden">
-                      <motion.div 
-                        className="bg-primary h-full"
-                        initial={{ width: "0%" }}
-                        animate={{ width: "100%" }}
-                        transition={{ duration: 120, ease: "linear" }} // Expecting ~2 mins per category
+                    <div className="h-1.5 w-full bg-primary/10 rounded-full overflow-hidden">
+                      <motion.div
+                        className="h-full bg-primary rounded-full"
+                        initial={{ width: 0 }}
+                        animate={{ width: `${categoryProgressPct}%` }}
+                        transition={{ duration: 0.5 }}
                       />
                     </div>
                   )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {!status?.is_running && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="flex flex-col gap-4 w-full"
+            >
+              <div className="flex flex-col gap-4 glass-premium rounded-xl p-4 border border-border/50">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button 
+                      variant={filterAction === "all" ? "default" : "outline"} 
+                      size="sm" 
+                      onClick={() => setFilterAction("all")}
+                    >
+                      Всички ({mergedItems.length})
+                    </Button>
+                    <Button 
+                      variant={filterAction === "existing" ? "default" : "outline"} 
+                      size="sm" 
+                      onClick={() => setFilterAction("existing")}
+                      className="text-muted-foreground"
+                    >
+                      Текущи
+                    </Button>
+                    <Button 
+                      variant={filterAction === "insert" ? "default" : "outline"} 
+                      size="sm" 
+                      onClick={() => setFilterAction("insert")}
+                      className="text-emerald-500 hover:text-emerald-600 border-emerald-500/20"
+                    >
+                      Нови ({preview?.counts?.new || 0})
+                    </Button>
+                    <Button 
+                      variant={filterAction === "update" ? "default" : "outline"} 
+                      size="sm" 
+                      onClick={() => setFilterAction("update")}
+                      className="text-amber-500 hover:text-amber-600 border-amber-500/20"
+                    >
+                      Променени ({preview?.counts?.updated || 0})
+                    </Button>
+                    <Button 
+                      variant={filterAction === "delete" ? "default" : "outline"} 
+                      size="sm" 
+                      onClick={() => setFilterAction("delete")}
+                      className="text-rose-500 hover:text-rose-600 border-rose-500/20"
+                    >
+                      Липсващи ({preview?.counts?.missing || 0})
+                    </Button>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={exportToCSV} className="gap-2">
+                      <Download className="w-4 h-4" />
+                      Експорт (CSV)
+                    </Button>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-3 items-end">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] uppercase font-bold text-muted-foreground ml-1">Категория</label>
+                    <select 
+                      value={selectedCategory}
+                      onChange={(e) => setSelectedCategory(e.target.value)}
+                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring outline-none"
+                    >
+                      <option value="all">Всички категории</option>
+                      {categories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] uppercase font-bold text-muted-foreground ml-1">Марка</label>
+                    <select 
+                      value={selectedBrand}
+                      onChange={(e) => setSelectedBrand(e.target.value)}
+                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring outline-none"
+                    >
+                      <option value="all">Всички марки</option>
+                      {brands.map(brand => (
+                        <option key={brand} value={brand}>{brand}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] uppercase font-bold text-muted-foreground ml-1">Дебелина</label>
+                    <select 
+                      value={selectedThickness}
+                      onChange={(e) => setSelectedThickness(e.target.value)}
+                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring outline-none"
+                    >
+                      <option value="all">Всички дебелини</option>
+                      {thicknesses.map(t => (
+                        <option key={t} value={t}>{t} мм</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] uppercase font-bold text-muted-foreground ml-1">Цена (€)</label>
+                    <div className="flex items-center gap-1">
+                      <input 
+                        type="number" 
+                        placeholder="От" 
+                        className="w-full h-10 rounded-md border border-input bg-background px-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+                        value={minPrice}
+                        onChange={(e) => setMinPrice(e.target.value)}
+                      />
+                      <input 
+                        type="number" 
+                        placeholder="До" 
+                        className="w-full h-10 rounded-md border border-input bg-background px-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+                        value={maxPrice}
+                        onChange={(e) => setMaxPrice(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 lg:col-span-2">
+                    <label className="text-[10px] uppercase font-bold text-muted-foreground ml-1">Търсене</label>
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-3 h-4 w-4 text-muted-foreground" />
+                      <input
+                        type="text"
+                        placeholder="Търсене по код или име..."
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors pl-9 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/20">
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <Checkbox 
+                        id="only-images" 
+                        checked={onlyWithImages} 
+                        onCheckedChange={(checked) => setOnlyWithImages(!!checked)} 
+                      />
+                      <label htmlFor="only-images" className="text-xs cursor-pointer select-none">Само със снимки</label>
+                    </div>
+                  </div>
+
+                  {(filterAction !== "all" || selectedCategory !== "all" || selectedBrand !== "all" || selectedThickness !== "all" || minPrice !== "" || maxPrice !== "" || searchQuery !== "" || onlyWithImages) && (
+                    <Button variant="ghost" size="sm" onClick={resetFilters} className="text-xs text-muted-foreground hover:text-foreground underline h-auto p-0">
+                      Изчисти всички филтри
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {/* ACTION BAR (Only show if there is a preview) */}
+              <AnimatePresence>
+                {preview && preview.items && preview.items.length > 0 && (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-xl bg-muted/30 border border-border/40 overflow-hidden"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Checkbox 
+                        checked={selectedIds.size > 0}
+                        onCheckedChange={selectAllFiltered}
+                        id="select-all"
+                      />
+                      <label htmlFor="select-all" className="text-sm font-medium leading-none cursor-pointer">
+                        {selectedIds.size > 0 ? `Избрани ${selectedIds.size} промени` : "Избери всички промени"}
+                      </label>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={applySelected}
+                        disabled={applying || selectedIds.size === 0}
+                        size="sm"
+                      >
+                        Приложи избраните ({selectedIds.size})
+                      </Button>
+                      <Button
+                        variant="default"
+                        className="bg-primary text-primary-foreground"
+                        onClick={commitAll}
+                        disabled={applying}
+                        size="sm"
+                      >
+                        Приложи ВСИЧКИ промени
+                      </Button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <div className="rounded-xl border border-border/50 bg-background overflow-hidden w-full relative min-h-[400px]">
+                {loadingCatalog && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-sm z-10">
+                    <RefreshCw className="w-6 h-6 animate-spin text-primary" />
+                  </div>
+                )}
+                <div className="overflow-x-auto w-full max-h-[800px]">
+                  <table className="w-full text-sm text-left relative border-collapse">
+                    <thead className="text-xs uppercase bg-slate-100 dark:bg-slate-800 border-b border-border/50 sticky top-0 z-20">
+                      <tr>
+                        <th className="px-4 py-3 w-10 text-center">
+                          {preview && preview.items && preview.items.length > 0 && (
+                            <Checkbox 
+                              checked={selectedIds.size > 0}
+                              onCheckedChange={selectAllFiltered}
+                            />
+                          )}
+                        </th>
+                        <th className="px-2 py-3 w-12 text-center text-muted-foreground font-mono">#</th>
+                        <th className="px-4 py-3 w-16 text-center">Снимка</th>
+                        <th className="px-4 py-3 min-w-[250px] cursor-pointer hover:bg-muted/80" onClick={() => handleSort('name')}>
+                          Име на артикул {sortConfig?.key === 'name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                        </th>
+                        <th className="px-4 py-3 w-32 cursor-pointer hover:bg-muted/80" onClick={() => handleSort('code')}>
+                          Код {sortConfig?.key === 'code' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                        </th>
+                        <th className="px-4 py-3 w-32 cursor-pointer hover:bg-muted/80" onClick={() => handleSort('category')}>
+                          Категория {sortConfig?.key === 'category' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                        </th>
+                        <th className="px-4 py-3 w-24 text-center">Дебелина</th>
+                        <th className="px-4 py-3 w-32 cursor-pointer hover:bg-muted/80" onClick={() => handleSort('price')}>
+                          Цена (EUR) {sortConfig?.key === 'price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                        </th>
+                        <th className="px-4 py-3 w-32 cursor-pointer hover:bg-muted/80" onClick={() => handleSort('brand')}>
+                          Марка {sortConfig?.key === 'brand' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                        </th>
+                        <th className="px-4 py-3 w-16 text-center">Линк</th>
+                        <th className="px-4 py-3 w-32 text-center cursor-pointer hover:bg-muted/80" onClick={() => handleSort('status')}>
+                          Статус {sortConfig?.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedItems.length === 0 && !loadingCatalog ? (
+                        <tr>
+                          <td colSpan={11} className="px-4 py-16 text-center text-muted-foreground">
+                            Няма намерени артикули.
+                          </td>
+                        </tr>
+                      ) : (
+                        paginatedItems.map((item, localIdx) => {
+                          const idx = (currentPage - 1) * itemsPerPage + localIdx;
+                          const isChange = item.action !== "existing";
+                          const isSelected = selectedIds.has(item.id);
+                          
+                          return (
+                            <tr 
+                              key={item.id} 
+                              className={`border-b border-border/10 hover:bg-muted/30 transition-colors ${isSelected ? 'bg-primary/5' : ''} ${!isChange ? 'opacity-80' : ''}`}
+                              onClick={() => {
+                                if (isChange) toggleSelection(item.id);
+                              }}
+                            >
+                              <td className="px-4 py-3 text-center" onClick={e => {
+                                if (isChange) e.stopPropagation();
+                              }}>
+                                {isChange && (
+                                  <Checkbox 
+                                    checked={isSelected}
+                                    onCheckedChange={() => toggleSelection(item.id)}
+                                  />
+                                )}
+                              </td>
+                              <td className="px-2 py-3 text-center text-muted-foreground font-mono text-[10px]">
+                                {idx + 1}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                {item.payload.imageUrl ? (
+                                  <div className="w-10 h-10 rounded overflow-hidden border border-border/50 mx-auto bg-white">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={item.payload.imageUrl} alt={item.payload.code} className="w-full h-full object-contain" loading="lazy" />
+                                  </div>
+                                ) : (
+                                  <div className="w-10 h-10 rounded bg-muted flex items-center justify-center mx-auto text-muted-foreground">
+                                    <ImageIcon className="w-4 h-4" />
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 font-medium">
+                                <div className="line-clamp-2" title={item.payload.name}>
+                                  {item.payload.name}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                                {item.payload.code || "—"}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-muted-foreground">
+                                {item.payload.category || "—"}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-center text-muted-foreground">
+                                {item.payload.thicknessMm ? `${item.payload.thicknessMm} мм` : "—"}
+                              </td>
+                              <td className="px-4 py-3 font-semibold">
+                                {item.payload.priceEur ? `${item.payload.priceEur.toFixed(2)}` : "—"}
+                                <span className="text-xs text-muted-foreground font-normal ml-1">{item.payload.unit}</span>
+                              </td>
+                              <td className="px-4 py-3 text-xs text-muted-foreground">
+                                {item.payload.brand || "—"}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                {item.payload.sourceUrl ? (
+                                  <a href={item.payload.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline text-xs" onClick={e => e.stopPropagation()}>
+                                    Salex ↗
+                                  </a>
+                                ) : "—"}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                {item.action === "existing" && (
+                                  <span className="inline-flex items-center text-xs text-muted-foreground">
+                                    Активен
+                                  </span>
+                                )}
+                                {item.action === "insert" && (
+                                  <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                                    Нов
+                                  </span>
+                                )}
+                                {item.action === "update" && (
+                                  <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                                    Променен
+                                  </span>
+                                )}
+                                {item.action === "delete" && (
+                                  <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-rose-500/10 text-rose-500 border border-rose-500/20">
+                                    Липсващ
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* PAGINATION BAR */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 glass-premium rounded-xl border border-border/50">
+                <div className="text-sm text-muted-foreground">
+                  Показани <strong>{Math.min(sortedAndFilteredItems.length, (currentPage - 1) * itemsPerPage + 1)}-{Math.min(sortedAndFilteredItems.length, currentPage * itemsPerPage)}</strong> от <strong>{sortedAndFilteredItems.length}</strong> артикула
+                </div>
+                
+                <div className="flex items-center gap-6">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Покажи:</span>
+                    <select 
+                      value={itemsPerPage} 
+                      onChange={(e) => setItemsPerPage(parseInt(e.target.value))}
+                      className="h-8 rounded border border-input bg-background px-2 text-xs outline-none focus:ring-1 focus:ring-ring"
+                    >
+                      {[25, 50, 100, 200, 500].map(val => (
+                        <option key={val} value={val}>{val}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <Button 
+                      variant="outline" 
+                      size="icon" 
+                      className="h-8 w-8" 
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </Button>
+                    <div className="flex items-center px-3 text-sm font-medium">
+                      Страница {currentPage} от {totalPages || 1}
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      size="icon" 
+                      className="h-8 w-8" 
+                      disabled={currentPage === totalPages || totalPages === 0}
+                      onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
               </div>
             </motion.div>
