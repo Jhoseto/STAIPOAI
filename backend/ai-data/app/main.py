@@ -48,6 +48,8 @@ from .services.pdf_generator import generate_offer_pdf
 
 app = FastAPI(title="STAIPO AI Data Service", version="0.2.0")
 
+from .state import STOPPED_RUN_IDS
+
 # Permissive CORS for local development/network access
 app.add_middleware(
   CORSMiddleware,
@@ -2392,21 +2394,28 @@ async def reindex_catalog():
 async def scrape_salex(background_tasks: BackgroundTasks):
   admin = get_supabase_admin()
   
-  # Check if a run is already active
-  active = admin.table("scrape_runs").select("id").eq("status", "running").execute()
-  if active.data:
-      return {"ok": False, "message": "Scraper-ът вече работи.", "run_id": active.data[0]["id"]}
+  # FORCED CLEANUP: Always wipe everything from temporary tables before starting.
+  # This ensures we don't pick up "zombie" runs from before a crash or restart.
+  try:
+      # Delete all runs. PostgREST requires a filter, so we use a non-matching UUID or neq.
+      admin.table("scrape_runs").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+      STOPPED_RUN_IDS.clear()
+      logger.info("FORCED CLEANUP: Temporary tables wiped for a fresh start.")
+  except Exception as e:
+      logger.warning(f"Initial cleanup failed: {e}")
 
   # Create new run
   new_run = admin.table("scrape_runs").insert({
       "status": "running",
-      "current_category": "Инициализация"
+      "current_category": "Инициализация",
+      "stop_requested": False
   }).execute()
   
   if not new_run.data:
       return {"ok": False, "message": "Неуспешно създаване на run."}
       
   run_id = new_run.data[0]["id"]
+  STOPPED_RUN_IDS.discard(str(run_id))
 
   background_tasks.add_task(run_full_scrape, run_id)
   return {"ok": True, "message": "Scraper-ът е стартиран.", "run_id": run_id}
@@ -2433,6 +2442,7 @@ async def get_scrape_status():
   
   return {
       "is_running": is_running,
+      "status": run.get("status"),
       "run_id": run.get("id"),
       "current_category": run.get("current_category"),
       "items_added": run.get("items_added") or 0,
@@ -2449,6 +2459,32 @@ async def get_scrape_status():
       "finished_at": run.get("finished_at"),
       "error_message": run.get("error_message")
   }
+
+
+@app.post("/v1/scrape/salex/stop")
+async def scrape_salex_stop():
+  admin = get_supabase_admin()
+  
+  # Find the LATEST running scraper
+  res = admin.table("scrape_runs").select("id").eq("status", "running").order("created_at", desc=True).limit(1).execute()
+  if not res.data:
+      return {"ok": False, "message": "Няма активна синхронизация"}
+  
+  run_id = res.data[0]["id"]
+  logger.info(f"Stopping run_id: {run_id}")
+  
+  # Set in memory stop flag for immediate reaction
+  STOPPED_RUN_IDS.add(str(run_id))
+  
+  # Set stop flag in DB for persistence/audit
+  try:
+      admin.table("scrape_runs").update({
+          "stop_requested": True
+      }).eq("id", run_id).execute()
+      return {"ok": True, "message": "Синхронизацията е спрена", "run_id": run_id}
+  except Exception as e:
+      logger.error(f"Error stopping scraper: {e}")
+      return {"ok": False, "message": "Грешка при спиране"}
 
 
 @app.get("/v1/scrape/salex/preview")

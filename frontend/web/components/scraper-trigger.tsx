@@ -154,15 +154,28 @@ export function ScraperTrigger() {
               setBusy(false);
               if (data.error_message) {
                 toast.error("Грешка при синхронизация", { description: data.error_message });
+              } else if (data.status === "stopped") {
+                toast.info("Синхронизацията е спрена!");
               } else {
                 toast.success("Синхронизацията завърши!");
               }
             }
+            
+            // Fetch preview whenever not running and we have a run_id, with a small delay for stopped to ensure data is ready
             if (!data.is_running && data.run_id && !data.error_message) {
-              const p = await fetch(`/api/scrape/salex/preview?run_id=${encodeURIComponent(data.run_id)}`);
-              if (p.ok) {
-                setPreview(await p.json());
-              }
+              setTimeout(async () => {
+                try {
+                  const p = await fetch(`/api/scrape/salex/preview?run_id=${encodeURIComponent(data.run_id)}`);
+                  if (p.ok) {
+                    const previewData = await p.json();
+                    if (previewData.ok && previewData.items) {
+                      setPreview(previewData);
+                    }
+                  }
+                } catch (e) {
+                  console.error("Preview fetch error:", e);
+                }
+              }, 500);
             }
           }
         } catch (e) {
@@ -565,10 +578,10 @@ export function ScraperTrigger() {
                     </div>
                     {status.is_running && (
                       <Button 
-                        variant="destructive" 
+                        variant="outline" 
                         size="sm"
                         onClick={stopScraper}
-                        className="gap-2 shadow-lg"
+                        className="gap-2 shadow-lg border-rose-500/50 text-rose-600 hover:bg-rose-500/10 hover:text-rose-700"
                       >
                         <Square className="w-4 h-4" /> Спри
                       </Button>
@@ -655,12 +668,12 @@ export function ScraperTrigger() {
                       transition={{ delay: 0.15 }}
                       className="relative p-4 rounded-2xl border border-slate-200/50 bg-slate-50/50 hover:bg-white hover:shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)] transition-all duration-500 group overflow-hidden"
                     >
-                      <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                      <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                       <div className="relative space-y-2.5">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Проверени</span>
-                          <div className="p-2 rounded-lg bg-emerald-500/10 group-hover:bg-emerald-500/15 transition-colors duration-300">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <div className="p-2 rounded-lg bg-blue-500/10 group-hover:bg-blue-500/15 transition-colors duration-300">
+                            <CheckCircle2 className="w-4 h-4 text-blue-600" />
                           </div>
                         </div>
                         <motion.div
@@ -684,12 +697,12 @@ export function ScraperTrigger() {
                         transition={{ delay: 0.2 }}
                         className="relative p-4 rounded-2xl border border-slate-200/50 bg-slate-50/50 hover:bg-white hover:shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)] transition-all duration-500 group overflow-hidden"
                       >
-                        <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                        <div className="absolute inset-0 bg-gradient-to-br from-slate-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                         <div className="relative space-y-2.5">
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Скорост</span>
-                            <div className="p-2 rounded-lg bg-purple-500/10 group-hover:bg-purple-500/15 transition-colors duration-300">
-                              <TrendingUp className="w-4 h-4 text-purple-600" />
+                            <div className="p-2 rounded-lg bg-slate-500/10 group-hover:bg-slate-500/15 transition-colors duration-300">
+                              <TrendingUp className="w-4 h-4 text-slate-600" />
                             </div>
                           </div>
                           <div className="text-2xl font-bold text-slate-900">
@@ -708,12 +721,12 @@ export function ScraperTrigger() {
                         transition={{ delay: 0.25 }}
                         className="relative p-4 rounded-2xl border border-slate-200/50 bg-slate-50/50 hover:bg-white hover:shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)] transition-all duration-500 group overflow-hidden"
                       >
-                        <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                        <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                         <div className="relative space-y-2.5">
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Време</span>
-                            <div className="p-2 rounded-lg bg-amber-500/10 group-hover:bg-amber-500/15 transition-colors duration-300">
-                              <Clock className="w-4 h-4 text-amber-600" />
+                            <div className="p-2 rounded-lg bg-blue-500/10 group-hover:bg-blue-500/15 transition-colors duration-300">
+                              <Clock className="w-4 h-4 text-blue-600" />
                             </div>
                           </div>
                           <div className="text-2xl font-bold text-slate-900">
@@ -757,10 +770,10 @@ export function ScraperTrigger() {
                       className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4 border-t border-slate-200/50"
                     >
                       <div className="relative p-4 rounded-2xl border border-slate-200/50 bg-slate-50/50 hover:bg-white hover:shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)] transition-all duration-500 group overflow-hidden text-center">
-                        <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                        <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                         <div className="relative space-y-2">
                           <div className="flex items-center justify-center gap-1.5 mb-2">
-                            <Plus className="w-4 h-4 text-emerald-600" />
+                            <Plus className="w-4 h-4 text-blue-600" />
                             <span className="text-xs font-semibold text-slate-600 uppercase">Нови</span>
                           </div>
                           <motion.div
@@ -774,10 +787,10 @@ export function ScraperTrigger() {
                         </div>
                       </div>
                       <div className="relative p-4 rounded-2xl border border-slate-200/50 bg-slate-50/50 hover:bg-white hover:shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)] transition-all duration-500 group overflow-hidden text-center">
-                        <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                        <div className="absolute inset-0 bg-gradient-to-br from-slate-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                         <div className="relative space-y-2">
                           <div className="flex items-center justify-center gap-1.5 mb-2">
-                            <RefreshCw className="w-4 h-4 text-amber-600" />
+                            <RefreshCw className="w-4 h-4 text-slate-600" />
                             <span className="text-xs font-semibold text-slate-600 uppercase">Променени</span>
                           </div>
                           <motion.div
@@ -791,10 +804,10 @@ export function ScraperTrigger() {
                         </div>
                       </div>
                       <div className="relative p-4 rounded-2xl border border-slate-200/50 bg-slate-50/50 hover:bg-white hover:shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)] transition-all duration-500 group overflow-hidden text-center">
-                        <div className="absolute inset-0 bg-gradient-to-br from-rose-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                        <div className="absolute inset-0 bg-gradient-to-br from-slate-400/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                         <div className="relative space-y-2">
                           <div className="flex items-center justify-center gap-1.5 mb-2">
-                            <Trash2 className="w-4 h-4 text-rose-600" />
+                            <Trash2 className="w-4 h-4 text-slate-500" />
                             <span className="text-xs font-semibold text-slate-600 uppercase">Липсващи</span>
                           </div>
                           <motion.div
@@ -843,9 +856,9 @@ export function ScraperTrigger() {
               {/* Show Preview Table if we have preview data, otherwise show catalog */}
               {preview?.items && preview.items.length > 0 ? (
                 <>
-                  <div className="space-y-2 p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">
-                    <div className="text-sm font-medium text-blue-900 dark:text-blue-100">Резултати от синхронизацията</div>
-                    <div className="text-xs text-blue-700 dark:text-blue-200">
+                  <div className="space-y-2 p-4 bg-slate-50/50 dark:bg-slate-950/30 rounded-lg border border-slate-200/50 dark:border-slate-800">
+                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Резултати от синхронизацията</div>
+                    <div className="text-xs text-slate-600 dark:text-slate-300">
                       Откритите промени готови за преглед и запазване. Избери които искаш да приложиш.
                     </div>
                   </div>
@@ -858,7 +871,7 @@ export function ScraperTrigger() {
                           size="sm" 
                           onClick={() => applyChanges({ applyNew: true, applyUpdated: true, deleteMissing: false, clearAfter: true })}
                           disabled={applying}
-                          className="gap-2 bg-emerald-600 hover:bg-emerald-700"
+                          className="gap-2 bg-blue-600 hover:bg-blue-700"
                         >
                           <CheckCircle2 className="w-4 h-4" /> Приложи НА всички НОВИ и ПРОМЕНЕНИ
                         </Button>
@@ -866,7 +879,7 @@ export function ScraperTrigger() {
                           size="sm" 
                           onClick={() => applyChanges({ applyNew: true, applyUpdated: true, deleteMissing: true, clearAfter: true })}
                           disabled={applying}
-                          className="gap-2 bg-blue-600 hover:bg-blue-700"
+                          className="gap-2 bg-slate-600 hover:bg-slate-700"
                         >
                           <CheckCircle2 className="w-4 h-4" /> Приложи ВСЕ (с намаляне)
                         </Button>
@@ -906,7 +919,7 @@ export function ScraperTrigger() {
                       variant={filterAction === "insert" ? "default" : "outline"} 
                       size="sm" 
                       onClick={() => setFilterAction("insert")}
-                      className="text-emerald-500 hover:text-emerald-600 border-emerald-500/20"
+                      className="text-blue-600 hover:text-blue-700 border-blue-200/50"
                     >
                       Нови ({preview?.counts?.new || 0})
                     </Button>
@@ -914,7 +927,7 @@ export function ScraperTrigger() {
                       variant={filterAction === "update" ? "default" : "outline"} 
                       size="sm" 
                       onClick={() => setFilterAction("update")}
-                      className="text-amber-500 hover:text-amber-600 border-amber-500/20"
+                      className="text-slate-600 hover:text-slate-700 border-slate-200/50"
                     >
                       Променени ({preview?.counts?.updated || 0})
                     </Button>
@@ -922,7 +935,7 @@ export function ScraperTrigger() {
                       variant={filterAction === "delete" ? "default" : "outline"} 
                       size="sm" 
                       onClick={() => setFilterAction("delete")}
-                      className="text-rose-500 hover:text-rose-600 border-rose-500/20"
+                      className="text-slate-500 hover:text-slate-600 border-slate-200/50"
                     >
                       Липсващи ({preview?.counts?.missing || 0})
                     </Button>
@@ -1225,17 +1238,17 @@ export function ScraperTrigger() {
                                   </span>
                                 )}
                                 {item.action === "insert" && (
-                                  <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                                  <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-blue-500/10 text-blue-700 border border-blue-200/50">
                                     Нов
                                   </span>
                                 )}
                                 {item.action === "update" && (
-                                  <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                                  <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-slate-500/10 text-slate-700 border border-slate-200/50">
                                     Променен
                                   </span>
                                 )}
                                 {item.action === "delete" && (
-                                  <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-rose-500/10 text-rose-500 border border-rose-500/20">
+                                  <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-slate-400/10 text-slate-600 border border-slate-200/50">
                                     Липсващ
                                   </span>
                                 )}
@@ -1244,22 +1257,31 @@ export function ScraperTrigger() {
                             
                             {/* Detail row for expanded update items */}
                             {isExpanded && canExpand && changedFields.length > 0 && (
-                              <tr className="border-b border-border/5 bg-slate-50/30 hover:bg-slate-50/50 transition-colors">
-                                <td colSpan={11} className="px-4 py-4">
-                                  <div className="space-y-3">
-                                    <div className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Променени полета:</div>
-                                    <div className="grid gap-2">
+                              <tr className="border-b border-blue-200/30 bg-blue-50/40 hover:bg-blue-50/60 transition-colors">
+                                <td colSpan={11} className="px-4 py-5">
+                                  <div className="space-y-4">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-1 h-5 bg-blue-600 rounded-full"></div>
+                                      <div className="text-sm font-bold text-slate-900">Подробни промени</div>
+                                    </div>
+                                    <div className="grid gap-3 ml-4">
                                       {changedFields.map((field, idx) => (
-                                        <div key={idx} className="flex items-center justify-between text-sm bg-white/50 px-3 py-2 rounded border border-border/10 hover:bg-white/80 transition-colors">
-                                          <span className="font-medium text-slate-700 min-w-[120px]">{field.label}:</span>
-                                          <div className="flex items-center gap-2 flex-1 ml-4">
-                                            <span className="line-through text-rose-500 opacity-75">
-                                              {field.oldVal !== null ? String(field.oldVal) : "—"}
-                                            </span>
-                                            <span className="text-slate-400">→</span>
-                                            <span className="font-semibold text-emerald-600">
-                                              {field.newVal !== null ? String(field.newVal) : "—"}
-                                            </span>
+                                        <div key={idx} className="flex flex-col gap-1 text-sm bg-white/70 px-4 py-3 rounded-lg border border-blue-100/50 hover:border-blue-200/80 hover:bg-white/90 transition-all">
+                                          <span className="font-semibold text-slate-900">{field.label}</span>
+                                          <div className="flex items-center gap-3 mt-1">
+                                            <div className="flex flex-col">
+                                              <span className="text-xs text-slate-500 font-medium">СТАРО</span>
+                                              <span className="line-through text-slate-600 opacity-70 font-mono">
+                                                {field.oldVal !== null ? String(field.oldVal) : "—"}
+                                              </span>
+                                            </div>
+                                            <div className="w-5 h-px bg-blue-300 flex-shrink-0"></div>
+                                            <div className="flex flex-col">
+                                              <span className="text-xs text-blue-600 font-medium">НОВО</span>
+                                              <span className="font-semibold text-slate-900 font-mono">
+                                                {field.newVal !== null ? String(field.newVal) : "—"}
+                                              </span>
+                                            </div>
                                           </div>
                                         </div>
                                       ))}

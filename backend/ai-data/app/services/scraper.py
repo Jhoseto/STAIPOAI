@@ -10,9 +10,14 @@ import httpx
 from bs4 import BeautifulSoup
 
 from .embeddings import get_embedding
-from ..supabase_client import get_supabase_admin
+from ..supabase_client import get_supabase_admin, get_supabase_async_admin
+from ..state import STOPPED_RUN_IDS
 
 logger = logging.getLogger(__name__)
+
+class ScraperStoppedException(Exception):
+    """Custom exception to halt the scraper immediately."""
+    pass
 
 SALEX_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -291,6 +296,27 @@ class SalexScraper:
         }
         self._last_db_update = datetime.now(timezone.utc)
 
+    async def _check_stop(self):
+        """Checks if stop_requested is True in the DB and raises ScraperStoppedException if so."""
+        # 1. Check in-memory state first (immediate result from same process)
+        if str(self.run_id) in STOPPED_RUN_IDS:
+            logger.info(f"🛑 STOP SIGNAL (IN-MEMORY) for run {self.run_id}")
+            raise ScraperStoppedException()
+
+        # 2. Check DB as fallback (async to avoid blocking loop)
+        try:
+            async_admin = await get_supabase_async_admin()
+            res = await async_admin.table("scrape_runs").select("stop_requested").eq("id", self.run_id).execute()
+            if res.data:
+                requested = res.data[0].get("stop_requested")
+                if requested:
+                    logger.info(f"🛑 STOP SIGNAL (DATABASE) for run {self.run_id}")
+                    raise ScraperStoppedException()
+        except ScraperStoppedException:
+            raise
+        except Exception as e:
+            logger.warning(f"Error checking stop signal for {self.run_id}: {e}")
+
     def _sync_state(self, force=False):
         now = datetime.now(timezone.utc)
         if force or (now - self._last_db_update).total_seconds() > 3.0:
@@ -324,12 +350,15 @@ class SalexScraper:
 
         visited: set[str] = set()
         discovered: dict[str, dict[str, str]] = {}
-        max_depth = 2
-        max_pages = 120
+        max_depth = 1  # Reduced depth for faster discovery
+        max_pages = 20  # Reduced pages for faster discovery
         processed_pages = 0
+        pages_without_new_cats = 0
+
         while queue:
-            if processed_pages >= max_pages:
-                logger.warning("Discovery page limit reached (%s). Continuing with found categories.", max_pages)
+            await self._check_stop()
+            if processed_pages >= max_pages or pages_without_new_cats > 10:
+                logger.info("Discovery limits reached. Continuing with found categories.")
                 break
             current_url, path_parts, depth = queue.pop(0)
             if not current_url or current_url in visited:
@@ -342,13 +371,17 @@ class SalexScraper:
                     continue
             except Exception:
                 continue
+            
             links = _extract_category_links(resp.text)
+            new_cats_found_this_page = 0
+            
             for link_name, link_url in links:
                 if not _is_category_url(link_url):
                     continue
                 next_path = path_parts + [link_name]
                 key = _canonical_url(link_url)
                 if key not in discovered:
+                    new_cats_found_this_page += 1
                     norm_type = _normalize_type(" > ".join(next_path), link_url)
                     discovered[key] = {
                         "url": key,
@@ -361,6 +394,11 @@ class SalexScraper:
                     self._sync_state()
                 if depth < max_depth:
                     queue.append((link_url, next_path, depth + 1))
+            
+            if new_cats_found_this_page == 0:
+                pages_without_new_cats += 1
+            else:
+                pages_without_new_cats = 0
 
         for seed_key, seed_name, seed_url in SEED_CATEGORIES:
             c_url = _canonical_url(seed_url)
@@ -401,6 +439,8 @@ class SalexScraper:
         logger.info(f"  📄 {total_pages} страница(и)")
         page_html = resp.text
         for page_num in range(1, total_pages + 1):
+            await self._check_stop()
+
             if page_num > 1:
                 page_url = base_url.rstrip("/") + f"/page-{page_num}/"
                 try:
@@ -412,6 +452,7 @@ class SalexScraper:
             products = _parse_products_from_page(page_html, key, name, path)
             logger.info(f"  ✓ стр.{page_num}: {len(products)} продукта")
             for p in products:
+                await self._check_stop()
                 self._discovered_products.add(p["sourceUrl"])
                 self.stats["products_discovered_total"] = len(self._discovered_products)
                 await self._upsert_product(p)
@@ -424,10 +465,16 @@ class SalexScraper:
             return
         self._seen_product_urls.add(source_url)
         item["sourceUrl"] = source_url
+        
+        # Track in memory for final diff calculation
         self._staged_by_id[item["id"]] = item
         
         self.stats["items_processed"] += 1
         self.stats["last_item_name"] = item["name"]
+        
+        # Periodically update DB to show progress in UI
+        if self.stats["items_processed"] % 10 == 0:
+            self._sync_state(force=True)
 
     @staticmethod
     def _is_changed(old: dict[str, Any], new: dict[str, Any]) -> bool:
@@ -441,20 +488,41 @@ class SalexScraper:
         return False
 
     async def run(self):
-        async with httpx.AsyncClient(headers=SALEX_HEADERS, timeout=30.0, follow_redirects=True) as client:
-            categories = await self.discover_categories(client)
-            self.stats["categories_processed"] = 0
-            self.stats["categories_discovered"] = len(categories)
-            self._sync_state(force=True)
+        stopped_early = False
+        
+        # Configure httpx limits to prevent Windows Socket Exhaustion (WinError 10035)
+        limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
+        
+        try:
+            async with httpx.AsyncClient(headers=SALEX_HEADERS, timeout=30.0, limits=limits, follow_redirects=True) as client:
+                categories = await self.discover_categories(client)
+                self.stats["categories_processed"] = 0
+                self.stats["categories_discovered"] = len(categories)
+                self._sync_state(force=True)
 
-            for idx, category in enumerate(categories, start=1):
-                await self.scrape_category(client, category, idx, len(categories))
-                await asyncio.sleep(0.75)
-            
+                for idx, category in enumerate(categories, start=1):
+                    await self._check_stop()
+                    
+                    await self.scrape_category(client, category, idx, len(categories))
+                    await asyncio.sleep(0.75)
+                
+                self.stats["unique_products_total"] = len(self._seen_product_urls)
+                self._sync_state(force=True)
+
+        except ScraperStoppedException:
+            logger.info("Scraper stopped via exception")
+            stopped_early = True
+            self.stats["current_category"] = "Спрян"
+        except Exception as e:
+            logger.error(f"Unexpected scraper error: {e}")
+            raise
+        finally:
+            # Always ensure we transition to stopped or completed and save stats
             self.stats["unique_products_total"] = len(self._seen_product_urls)
             self._sync_state(force=True)
 
         # Build preview diff vs current DB and insert into scrape_items
+        # ...existing code...
         all_existing = []
         limit = 1000
         offset = 0
@@ -520,8 +588,11 @@ class SalexScraper:
         self.stats["pending_updated"] = updated_count
         self.stats["pending_missing"] = missing_count
         
+        # Check if stop was requested to set correct status
+        final_status = "stopped" if stopped_early else "completed"
+        
         self.admin.table("scrape_runs").update({
-            "status": "completed",
+            "status": final_status,
             "finished_at": datetime.now(timezone.utc).isoformat(),
             **self.stats
         }).eq("id", self.run_id).execute()
@@ -540,6 +611,8 @@ async def run_full_scrape(run_id: str):
             }).eq("id", run_id).execute()
         except:
             pass
+    finally:
+        STOPPED_RUN_IDS.discard(str(run_id))
 
 def get_sync_preview(run_id: str | None) -> dict[str, Any]:
     if not run_id:
@@ -607,11 +680,17 @@ async def apply_sync_actions(
         emb = await get_embedding(item.get("name", ""))
         if emb:
             item["embedding"] = emb
-        # remove categoryPath before insert since it doesn't exist in DB
+        # Remove unsupported columns before insert
         if "categoryPath" in item:
             del item["categoryPath"]
-        admin.table("catalog").upsert(item).execute()
-        inserted += 1
+        if "salex_id" in item:
+            del item["salex_id"]
+        
+        try:
+            admin.table("catalog").upsert(item).execute()
+            inserted += 1
+        except Exception as e:
+            logger.error(f"Error inserting item {item.get('name')}: {e}")
 
     to_update = [i["payload"] for i in items if i["action"] == "update" and "id" in i["payload"]]
     for item in to_update:
@@ -629,8 +708,15 @@ async def apply_sync_actions(
             "imageUrl": item.get("imageUrl"),
             "lastScrapedAt": item.get("lastScrapedAt"),
         }
-        admin.table("catalog").update(update_payload).eq("id", item.get("id")).execute()
-        updated += 1
+        
+        # Ensure we only send non-None fields that exist in DB to prevent schema errors
+        clean_payload = {k: v for k, v in update_payload.items() if v is not None}
+        
+        try:
+            admin.table("catalog").update(clean_payload).eq("id", item.get("id")).execute()
+            updated += 1
+        except Exception as e:
+            logger.error(f"Error updating item {item.get('name')}: {e}")
 
     to_delete = [i["catalog_id"] for i in items if i["action"] == "delete" and i["catalog_id"]]
     if to_delete:

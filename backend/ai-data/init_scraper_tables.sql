@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS public.scrape_runs (
     pending_missing integer DEFAULT 0,
     last_item_name text,
     error_message text,
+    stop_requested boolean DEFAULT false,
     created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL,
     finished_at timestamp with time zone
 );
