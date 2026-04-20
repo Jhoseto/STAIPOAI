@@ -6,7 +6,7 @@ import { MessageSquare, Send, CheckCircle2, Factory, Wrench, Flag } from "lucide
 
 export type ProjectStage = "inquiry" | "offer_sent" | "approved" | "production" | "installation" | "completed";
 
-export const STAGES: { id: ProjectStage; label: string; icon: React.ElementType; color: string; bg: string }[] = [
+export const STAGES: { id: ProjectStage; label: string; icon: React.ComponentType<{ className?: string }>; color: string; bg: string }[] = [
   { id: "inquiry", label: "Запитване", icon: MessageSquare, color: "text-blue-600", bg: "bg-blue-50 border-blue-200" },
   { id: "offer_sent", label: "Изпратена Оферта", icon: Send, color: "text-amber-600", bg: "bg-amber-50 border-amber-200" },
   { id: "approved", label: "Одобрена", icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50 border-emerald-200" },

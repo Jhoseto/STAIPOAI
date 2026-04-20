@@ -37,7 +37,7 @@ const emptyProfile: Omit<MasterProfile, "userId"> = {
   bankName: "",
 };
 
-function Field({ label, icon: Icon, children }: { label: string; icon: React.ElementType; children: React.ReactNode }) {
+function Field({ label, icon: Icon, children }: { label: string; icon: React.ComponentType<{ className?: string }>; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
       <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500">

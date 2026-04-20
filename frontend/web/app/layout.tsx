@@ -41,9 +41,10 @@ export default function RootLayout({
     <html
       lang="bg"
       className={`${geistSans.variable} ${geistMono.variable} ${inter.variable} ${playfair.variable} h-full antialiased`}
+      data-scroll-behavior="smooth"
       suppressHydrationWarning
     >
-      <head suppressHydrationWarning>
+      <head>
         <script
           suppressHydrationWarning
           dangerouslySetInnerHTML={{
@@ -56,7 +57,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
           <WorkspaceProvider>
             {children}

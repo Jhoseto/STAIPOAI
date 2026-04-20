@@ -20,6 +20,7 @@ import {
   Users,
   UserCircle,
   Zap,
+  Box,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
@@ -47,12 +48,19 @@ const privateGroups = [
     ],
   },
   {
+    id: "cad",
+    label: "Проектиране",
+    icon: Compass,
+    items: [
+      { href: "/kitchen-designer", label: "Kitchen Designer", icon: Box },
+    ],
+  },
+  {
     id: "business",
     label: "Бизнес",
     icon: Users,
     items: [
       { href: "/app/clients", label: "Клиенти", icon: Users },
-      { href: "/app/stats", label: "Статистика", icon: BarChart3 },
     ],
   },
 ];
@@ -79,7 +87,7 @@ const publicGroups = [
   }
 ];
 
-import { BarChart3 } from "lucide-react";
+// import { BarChart3 } from "lucide-react";
 
 function getAvatarUrl(raw: string | null | undefined): string | null {
   if (!raw) return null;
@@ -430,8 +438,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </motion.aside>
 
-      <div className="flex-1 min-w-0">
-        <main className="p-6 md:p-8 animate-enter">{children}</main>
+      <div className="flex-1 min-w-0 relative">
+        <main className={cn(
+          "animate-enter h-full", 
+          pathname === "/kitchen-designer" ? "p-0" : "p-6 md:p-8"
+        )}>
+          {children}
+        </main>
       </div>
     </div>
   );
