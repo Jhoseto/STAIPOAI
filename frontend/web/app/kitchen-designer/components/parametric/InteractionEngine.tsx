@@ -66,15 +66,15 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
           endCommand();
           clearSelection();
         }
-      } else if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+      } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC') {
         copySelection();
-      } else if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+      } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV') {
         pasteSelection();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentCommand, isDrawing, finishWall, endCommand, clearSelection]);
+  }, [currentCommand, isDrawing, finishWall, endCommand, clearSelection, copySelection, pasteSelection]);
 
   if (!drawing) return null;
 
@@ -124,7 +124,7 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
            setGhostRotation(snapRes.rotation);
         }
       }
-    } else if (currentCommand === 'WALL') {
+    } else if (currentCommand === 'WALL' || currentCommand === 'PASTE') {
       const snapped = getVertexSnap({ x, y: z }, drawing.entities);
       setGhostPos(new THREE.Vector3(snapped.x, 0, snapped.y));
     }

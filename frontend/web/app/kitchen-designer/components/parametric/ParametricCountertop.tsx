@@ -1,5 +1,7 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
+import { Html } from '@react-three/drei';
+import { Lock } from 'lucide-react';
 import { CountertopEntity } from '../../types';
 import { useCADStore } from '../../store/cad-store';
 
@@ -123,10 +125,19 @@ export function ParametricCountertop({ countertop, is2D, selected }: CountertopP
 
       {/* Selection Highlight */}
       {selected && (
-        <mesh position={[xOffset, height / 2, zOffset]}>
-          <boxGeometry args={[totalWidth + 4, height + 4, totalDepth + 4]} />
+        <mesh position={[0, height / 2, 0]}>
+          <boxGeometry args={[width + 10, height + 10, depth + 10]} />
           <primitive object={materials.selected} attach="material" />
         </mesh>
+      )}
+
+      {/* 3D Lock Indicator */}
+      {selected && countertop.locked && (
+        <Html distanceFactor={10} position={[0, height + 100, 0]}>
+          <div className="flex items-center justify-center bg-red-600 text-white p-1.5 rounded-full shadow-lg shadow-red-500/50 animate-bounce">
+            <Lock size={12} strokeWidth={3} />
+          </div>
+        </Html>
       )}
     </group>
   );

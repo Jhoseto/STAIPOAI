@@ -53,6 +53,7 @@ interface CADState {
   addEntity: (entity: Entity) => void;
   deleteEntity: (id: string) => void;
   updateEntity: (id: string, updates: Partial<Entity>) => void;
+  setLocked: (ids: string[], locked: boolean) => void;
   
   // Selection operations
   selectEntity: (id: string, additive?: boolean) => void;
@@ -149,10 +150,16 @@ const cadStore = create<CADState>()(
   isDraggingObj: false,
   setDraggingObj: (isDragging) => set({ isDraggingObj: isDragging }),
   dragState: null as { id: string, type: string, offsetX: number, offsetZ: number, originalGeometry: any } | null,
-  startDragging: (id: string, type: string, x: number, z: number, geom: any) => set({ 
-    isDraggingObj: true, 
-    dragState: { id, type, offsetX: x, offsetZ: z, originalGeometry: geom } 
-  }),
+  startDragging: (id, type, x, z, geom) => {
+    const state = get();
+    const entity = state.drawing?.entities.find(e => e.id === id);
+    if (entity?.locked) return; // Block dragging if locked
+    
+    set({ 
+      isDraggingObj: true, 
+      dragState: { id, type, offsetX: x - geom.position.x, offsetZ: z - geom.position.y, originalGeometry: geom } 
+    });
+  },
   stopDragging: () => set({ isDraggingObj: false, dragState: null }),
   
   clipboard: [],
@@ -391,8 +398,22 @@ const cadStore = create<CADState>()(
   updateEntity: (id, updates) => set(state => state.drawing ? ({
     drawing: {
       ...state.drawing,
+      entities: state.drawing.entities.map((e: Entity) => {
+        if (e.id === id) {
+          // If locked, only allow unlocking. Block all other updates (geometry, properties, etc.)
+          if (e.locked && updates.locked === undefined) return e;
+          return { ...e, ...updates };
+        }
+        return e;
+      })
+    }
+  }) : {}),
+
+  setLocked: (ids, locked) => set(state => state.drawing ? ({
+    drawing: {
+      ...state.drawing,
       entities: state.drawing.entities.map((e: Entity) => 
-        e.id === id ? { ...e, ...updates } : e
+        ids.includes(e.id) ? { ...e, locked } : e
       )
     }
   }) : {}),

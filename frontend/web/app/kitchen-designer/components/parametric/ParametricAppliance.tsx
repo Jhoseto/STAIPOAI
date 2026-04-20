@@ -1,5 +1,7 @@
 import React from 'react';
 import * as THREE from 'three';
+import { Html } from '@react-three/drei';
+import { Lock } from 'lucide-react';
 import { ApplianceEntity } from '../../types';
 import { useCADStore } from '../../store/cad-store';
 
@@ -133,6 +135,15 @@ export function ParametricAppliance({ appliance, is2D, selected }: ApplianceProp
           <boxGeometry args={[width + 10, height + 10, depth + 10]} />
           <meshStandardMaterial color="#3b82f6" transparent opacity={0.2} wireframe />
         </mesh>
+      )}
+
+      {/* 3D Lock Indicator */}
+      {selected && appliance.locked && (
+        <Html distanceFactor={10} position={[0, height + 100, 0]}>
+          <div className="flex items-center justify-center bg-red-600 text-white p-1.5 rounded-full shadow-lg shadow-red-500/50 animate-bounce">
+            <Lock size={12} strokeWidth={3} />
+          </div>
+        </Html>
       )}
     </group>
   );
