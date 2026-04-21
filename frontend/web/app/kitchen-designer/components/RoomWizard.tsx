@@ -12,7 +12,7 @@ import {
   ArrowLeft,
   Sparkles
 } from 'lucide-react';
-import { RoomDimensions, GeneratedLayout, useRoomWizardStore } from '../store/room.store';
+import { RoomDimensions, GeneratedLayout, useRoomWizardStore, DoorPosition, WindowPosition } from '../store/room.store';
 import { useCADStore } from '../store/cad-store';
 
 interface RoomWizardProps {
@@ -498,7 +498,7 @@ export function RoomWizard({ onComplete }: RoomWizardProps) {
                     key={layout.id}
                     whileHover={{ scale: 1.02 }}
                     className="border border-gray-200 rounded-lg p-6 cursor-pointer hover:border-blue-500 hover:shadow-lg"
-                    onClick={() => onComplete(layout)}
+                    onClick={() => { if (onComplete) (onComplete as any)(layout); }}
                   >
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-semibold text-gray-900">{layout.name}</h3>

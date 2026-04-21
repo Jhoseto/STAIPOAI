@@ -1,4 +1,4 @@
-import { Entity, CabinetEntity, FurnitureEntity, CountertopEntity, BOMPanel, EdgeBandingType } from '../../types';
+import { Entity, CabinetEntity, FurnitureEntity, CountertopEntity, BOMPanel, EdgeBandingType } from '../types';
 
 /**
  * Standard edge bandings templates
@@ -27,7 +27,7 @@ export function generateBOM(entities: Entity[]): BOMPanel[] {
 function generateCabinetPanels(cabinet: CabinetEntity): BOMPanel[] {
   const panels: BOMPanel[] = [];
   const { width, depth, height } = cabinet.geometry;
-  const isWallCabinet = cabinet.geometry.elevation > 0;
+  const isWallCabinet = cabinet.geometry.cabinetType === 'wall';
   
   const carcassThickness = 18; // mm (Основа ПДЧ)
   const frontThickness = 18;   // mm (Врати МДФ/ПДЧ)
