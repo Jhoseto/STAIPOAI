@@ -142,3 +142,98 @@ export function calculateSnap(
 
   return { position: bestPos, rotation: bestRot, snapped };
 }
+
+/**
+ * Calculates snapping for vertical furniture panels (end panels, back panels).
+ * Snaps the panel to the left, right, or back face of nearby cabinets.
+ */
+export function calculateFurnitureSnap(
+  mousePos: Point2D,
+  furnitureGeom: { width: number; depth: number; height: number; orientation?: string },
+  allEntities: Entity[],
+  currentRotation: number = 0
+): SnapResult {
+  const SNAP_DISTANCE = 250; // 250mm magnetic radius
+  let bestPos = { ...mousePos };
+  let bestRot = currentRotation;
+  let snapped = false;
+  let minDistance = SNAP_DISTANCE;
+
+  const panelThickness = furnitureGeom.orientation === 'vertical'
+    ? furnitureGeom.width   // panel "width" becomes thickness
+    : furnitureGeom.height; // flat slab
+
+  for (const ent of allEntities) {
+    if (ent.type !== 'cabinet') continue;
+    const cab = ent as CabinetEntity;
+    const { position: cabPos, rotation: cabRot, width: cabW, depth: cabD } = cab.geometry;
+
+    const cos = Math.cos(cabRot);
+    const sin = Math.sin(cabRot);
+
+    // Cabinet face centres in world space
+    const faces = [
+      // Left face
+      {
+        centre: {
+          x: cabPos.x - (cabW / 2 + panelThickness / 2) * cos,
+          y: cabPos.y - (cabW / 2 + panelThickness / 2) * sin,
+        },
+        rotation: cabRot, // panel stands parallel to cabinet
+      },
+      // Right face
+      {
+        centre: {
+          x: cabPos.x + (cabW / 2 + panelThickness / 2) * cos,
+          y: cabPos.y + (cabW / 2 + panelThickness / 2) * sin,
+        },
+        rotation: cabRot,
+      },
+      // Back face  (panel flush against the back)
+      {
+        centre: {
+          x: cabPos.x + (cabD / 2 + panelThickness / 2) * sin,
+          y: cabPos.y - (cabD / 2 + panelThickness / 2) * cos,
+        },
+        rotation: cabRot + Math.PI / 2,
+      },
+    ];
+
+    for (const face of faces) {
+      const dist = Math.hypot(mousePos.x - face.centre.x, mousePos.y - face.centre.y);
+      if (dist < minDistance) {
+        minDistance = dist;
+        bestPos = face.centre;
+        bestRot = face.rotation;
+        snapped = true;
+      }
+    }
+  }
+
+  // Also try snapping to walls (re-use logic from calculateSnap)
+  if (!snapped) {
+    for (const ent of allEntities) {
+      if (ent.type !== 'wall') continue;
+      const wall = ent as WallEntity;
+      const { distance, point } = getClosestPointOnSegment(mousePos, wall.geometry.start, wall.geometry.end);
+
+      if (distance < minDistance) {
+        minDistance = distance;
+        const dx = wall.geometry.end.x - wall.geometry.start.x;
+        const dy = wall.geometry.end.y - wall.geometry.start.y;
+        const wallAngle = Math.atan2(dy, dx);
+        const cross = dx * (mousePos.y - wall.geometry.start.y) - dy * (mousePos.x - wall.geometry.start.x);
+        const normalAngle = cross > 0 ? wallAngle + Math.PI / 2 : wallAngle - Math.PI / 2;
+        bestRot = normalAngle + Math.PI;
+        const offsetDist = (furnitureGeom.depth / 2) + wall.geometry.thickness / 2;
+        bestPos = {
+          x: point.x + Math.cos(normalAngle) * offsetDist,
+          y: point.y + Math.sin(normalAngle) * offsetDist,
+        };
+        snapped = true;
+      }
+    }
+  }
+
+  return { position: bestPos, rotation: bestRot, snapped };
+}

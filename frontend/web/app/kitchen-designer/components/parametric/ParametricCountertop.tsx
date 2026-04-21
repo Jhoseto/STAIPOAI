@@ -11,24 +11,21 @@ interface CountertopProps {
   selected?: boolean;
 }
 
-const materials = {
-  marble: new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.1, metalness: 0.1 }),
-  granite: new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.2, metalness: 0.1 }),
-  quartz: new THREE.MeshStandardMaterial({ color: '#e2e8f0', roughness: 0.05, metalness: 0.05 }),
-  wood: new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.8, metalness: 0 }),
-  laminate: new THREE.MeshStandardMaterial({ color: '#94a3b8', roughness: 0.4, metalness: 0 }),
-  selected: new THREE.MeshStandardMaterial({ 
-    color: '#3b82f6', 
-    transparent: true, 
-    opacity: 0.3,
-    depthWrite: false,
-    side: THREE.DoubleSide
-  })
+import { PBRMaterials } from '../../lib/pbr-materials';
+
+const getMaterial = (matName: string) => {
+  switch (matName) {
+    case 'marble': return PBRMaterials.countertop_marble;
+    case 'granite': return PBRMaterials.countertop_granite_dark;
+    case 'wood': return PBRMaterials.countertop_wood;
+    default: return PBRMaterials.carcass_white;
+  }
 };
 
 export function ParametricCountertop({ countertop, is2D, selected }: CountertopProps) {
   const selectEntity = useCADStore(state => state.selectEntity);
   const startDragging = useCADStore(state => state.startDragging);
+  const drawing = useCADStore(state => state.drawing);
   const { width, depth, height, elevation, rotation, position } = countertop.geometry;
   const { overhang, backsplash, backsplashHeight, material, edgeRadius } = countertop.properties;
 
@@ -46,9 +43,13 @@ export function ParametricCountertop({ countertop, is2D, selected }: CountertopP
         position={[position.x, 0, position.y]} 
         rotation={[0, -rotation, 0]}
         onPointerDown={(e) => {
+          if (useCADStore.getState().currentCommand) return;
           e.stopPropagation();
-          selectEntity(countertop.id, e.ctrlKey || e.metaKey);
-          startDragging(countertop.id, 'countertop', e.point.x, e.point.z, { ...countertop.geometry });
+          const isAlreadySelected = useCADStore.getState().selection.includes(countertop.id);
+          if (!isAlreadySelected) {
+            selectEntity(countertop.id, e.ctrlKey || e.metaKey);
+          }
+          startDragging(countertop.id, 'countertop', e.point.x, e.point.z);
         }}
       >
         <mesh position={[xOffset, 100, zOffset]}>
@@ -59,7 +60,48 @@ export function ParametricCountertop({ countertop, is2D, selected }: CountertopP
     );
   }
 
-  const activeMaterial = materials[material as keyof typeof materials] || materials.marble;
+  const activeMaterial = getMaterial(material);
+
+  // Compute holes from appliances that sit on this countertop
+  const applianceHoles = useMemo(() => {
+    if (!drawing) return [];
+    const cos = Math.cos(-rotation);
+    const sin = Math.sin(-rotation);
+
+    return drawing.entities.filter(e =>
+      e.type === 'appliance' &&
+      (e.properties.applianceType === 'sink_single' ||
+       e.properties.applianceType === 'sink_double' ||
+       e.properties.applianceType === 'hob_induction' ||
+       e.properties.applianceType === 'hob_gas')
+    ).map(appliance => {
+      // Transform appliance world position into countertop local space
+      const ax = appliance.geometry.position.x - position.x;
+      const az = appliance.geometry.position.y - position.y; // .y is Z in world
+
+      // Rotate into countertop's local coordinate space
+      const localX = ax * cos - az * sin;
+      const localZ = ax * sin + az * cos;
+
+      // Check if appliance center is on this countertop
+      const hw = totalWidth / 2;
+      const hd = totalDepth / 2;
+      if (localX < -hw || localX > hw || localZ < -hd || localZ > hd) return null;
+
+      // Create a rectangular hole with a small margin (20mm) from appliance edges
+      const margin = 20;
+      const holeW = appliance.geometry.width - margin * 2;
+      const holeD = appliance.geometry.depth - margin * 2;
+
+      const hole = new THREE.Shape();
+      hole.moveTo(localX - holeW / 2, localZ - holeD / 2);
+      hole.lineTo(localX + holeW / 2, localZ - holeD / 2);
+      hole.lineTo(localX + holeW / 2, localZ + holeD / 2);
+      hole.lineTo(localX - holeW / 2, localZ + holeD / 2);
+      hole.closePath();
+      return hole;
+    }).filter(Boolean) as THREE.Shape[];
+  }, [drawing, countertop.id, position.x, position.y, rotation, totalWidth, totalDepth]);
 
   // Create custom shape for the countertop slab with rounded front corners
   const shape = useMemo(() => {
@@ -80,9 +122,12 @@ export function ParametricCountertop({ countertop, is2D, selected }: CountertopP
     s.absarc(-totalWidth / 2 + r, -totalDepth / 2 + r, r, -Math.PI / 2, -Math.PI, true);
     // Back to Back-Left
     s.lineTo(-totalWidth / 2, totalDepth / 2);
+
+    // Add appliance holes
+    s.holes = applianceHoles;
     
     return s;
-  }, [totalWidth, totalDepth, edgeRadius]);
+  }, [totalWidth, totalDepth, edgeRadius, applianceHoles]);
 
   const extrudeSettings = useMemo(() => ({
     steps: 1,
@@ -99,9 +144,13 @@ export function ParametricCountertop({ countertop, is2D, selected }: CountertopP
       position={[position.x, elevation, position.y]} 
       rotation={[0, -rotation, 0]}
       onPointerDown={(e) => {
+        if (useCADStore.getState().currentCommand) return;
         e.stopPropagation();
-        selectEntity(countertop.id, e.ctrlKey || e.metaKey);
-        startDragging(countertop.id, 'countertop', e.point.x, e.point.z, { ...countertop.geometry });
+        const isAlreadySelected = useCADStore.getState().selection.includes(countertop.id);
+        if (!isAlreadySelected) {
+          selectEntity(countertop.id, e.ctrlKey || e.metaKey);
+        }
+        startDragging(countertop.id, 'countertop', e.point.x, e.point.z);
       }}
     >
       {/* Main Slab */}
@@ -125,9 +174,9 @@ export function ParametricCountertop({ countertop, is2D, selected }: CountertopP
 
       {/* Selection Highlight */}
       {selected && (
-        <mesh position={[0, height / 2, 0]}>
-          <boxGeometry args={[width + 10, height + 10, depth + 10]} />
-          <primitive object={materials.selected} attach="material" />
+        <mesh position={[xOffset, height / 2, zOffset]}>
+          <boxGeometry args={[totalWidth + 10, height + 10, totalDepth + 10]} />
+          <primitive object={PBRMaterials.selected} attach="material" />
         </mesh>
       )}
 

@@ -58,10 +58,13 @@ export function ParametricWall({ wall, is2D, selected, isGhost }: WallProps) {
         position={[midX, 0, midZ]} 
         rotation={[0, -angle, 0]}
         onPointerDown={(e) => {
-          if (isGhost) return;
+          if (isGhost || useCADStore.getState().currentCommand) return;
           e.stopPropagation();
-          selectEntity(wall.id, e.ctrlKey || e.metaKey);
-          startDragging(wall.id, 'wall', e.point.x, e.point.z, { ...wall.geometry });
+          const isAlreadySelected = useCADStore.getState().selection.includes(wall.id);
+          if (!isAlreadySelected) {
+            selectEntity(wall.id, e.ctrlKey || e.metaKey);
+          }
+          startDragging(wall.id, 'wall', e.point.x, e.point.z);
         }}
       >
         <mesh position={[0, height / 2, 0]}>
@@ -83,10 +86,13 @@ export function ParametricWall({ wall, is2D, selected, isGhost }: WallProps) {
       position={[midX, 0, midZ]} 
       rotation={[0, -angle, 0]}
       onPointerDown={(e) => {
-        if (isGhost) return;
+        if (isGhost || useCADStore.getState().currentCommand) return;
         e.stopPropagation();
-        selectEntity(wall.id, e.ctrlKey || e.metaKey);
-        startDragging(wall.id, 'wall', e.point.x, e.point.z, { ...wall.geometry });
+        const isAlreadySelected = useCADStore.getState().selection.includes(wall.id);
+        if (!isAlreadySelected) {
+          selectEntity(wall.id, e.ctrlKey || e.metaKey);
+        }
+        startDragging(wall.id, 'wall', e.point.x, e.point.z);
       }}
     >
       {/* Main Wall Body */}

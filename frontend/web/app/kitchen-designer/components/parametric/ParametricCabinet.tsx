@@ -13,50 +13,7 @@ interface CabinetProps {
   hasCollision?: boolean;
 }
 
-// Materials definition for the premium look
-const materials = {
-  carcass: new THREE.MeshStandardMaterial({ 
-    color: '#f8fafc', // White/light gray melamine
-    roughness: 0.8,
-    metalness: 0.05
-  }),
-  front: new THREE.MeshStandardMaterial({
-    color: '#1e293b', // Slate 800 (Premium dark front)
-    roughness: 0.2,   // Slightly glossy
-    metalness: 0.1
-  }),
-  wireframe: new THREE.MeshBasicMaterial({
-    color: '#38bdf8', // Light blue wireframe for 2D plan
-    wireframe: true
-  }),
-  selected: new THREE.MeshStandardMaterial({
-    color: '#3b82f6', // Bright blue for selected state
-    transparent: true,
-    opacity: 0.3,
-    roughness: 0.1
-  }),
-  ghost: new THREE.MeshStandardMaterial({
-    color: '#38bdf8', // Neon blue for the ghost
-    transparent: true,
-    opacity: 0.6,
-    roughness: 0.1,
-    metalness: 0.1,
-    depthWrite: false
-  }),
-  handle: new THREE.MeshStandardMaterial({
-    color: '#94a3b8', // Premium metallic silver
-    metalness: 0.8,
-    roughness: 0.2
-  }),
-  collision: new THREE.MeshStandardMaterial({
-    color: '#ef4444', // Red-500
-    transparent: true,
-    opacity: 0.35,
-    roughness: 0.1,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  }),
-};
+import { PBRMaterials } from '../../lib/pbr-materials';
 
 export function ParametricCabinet({ cabinet, is2D, selected, isGhost, hasCollision }: CabinetProps) {
   const selectEntity = useCADStore(state => state.selectEntity);
@@ -86,37 +43,47 @@ export function ParametricCabinet({ cabinet, is2D, selected, isGhost, hasCollisi
         name: 'left_side',
         size: [thickness, height, carcassDepth],
         pos: [-width / 2 + thickness / 2, height / 2, frontThickness / 2],
-        material: materials.carcass
+        material: PBRMaterials.carcass_dark
       },
       // Right Side Panel
       {
         name: 'right_side',
         size: [thickness, height, carcassDepth],
         pos: [width / 2 - thickness / 2, height / 2, frontThickness / 2],
-        material: materials.carcass
+        material: PBRMaterials.carcass_dark
       },
       // Bottom Panel
       {
         name: 'bottom',
         size: [width - thickness * 2, thickness, carcassDepth],
         pos: [0, thickness / 2, frontThickness / 2],
-        material: materials.carcass
+        material: PBRMaterials.carcass_dark
       },
       // Top Panel / Rails (Depending on base or wall cabinet)
       {
         name: 'top',
         size: [width - thickness * 2, thickness, carcassDepth],
         pos: [0, height - thickness / 2, frontThickness / 2],
-        material: materials.carcass
+        material: PBRMaterials.carcass_dark
       },
       // Back Panel
       {
         name: 'back',
         size: [width - thickness * 2, height - thickness * 2, backThickness],
         pos: [0, height / 2, carcassDepth / 2 - backThickness / 2 + frontThickness / 2],
-        material: materials.carcass
+        material: PBRMaterials.carcass_dark
       }
     ];
+
+    // Динамичен цокъл (Auto-Plinth) за подови шкафове
+    if (bottomY > 0 && bottomY <= 150 && !isGhost) {
+      baseParts.push({
+        name: 'plinth',
+        size: [width, bottomY, carcassDepth - 40], // Plinth is set back by 40mm
+        pos: [0, -bottomY / 2, frontThickness / 2 - 20],
+        material: PBRMaterials.plinth_anthracite
+      });
+    }
 
     // Динамични вратички и дръжки (Dynamic Doors & Metallic Handles)
     // По подразбиране: ако е над 600мм - слагаме 2 врати
@@ -130,7 +97,7 @@ export function ParametricCabinet({ cabinet, is2D, selected, isGhost, hasCollisi
         name: `door_${i}`,
         size: [doorWidth, height - gap * 2, frontThickness],
         pos: [doorX, height / 2, -carcassDepth / 2 + frontThickness / 2],
-        material: isGhost ? materials.ghost : materials.front
+        material: isGhost ? PBRMaterials.ghost : PBRMaterials.front_matte_slate
       });
 
       // Добавяне на луксозна метална дръжка (Premium Metallic Handle)
@@ -143,7 +110,7 @@ export function ParametricCabinet({ cabinet, is2D, selected, isGhost, hasCollisi
         name: `handle_${i}`,
         size: [10, 160, 24], // Premium handle dimensions
         pos: [handleX, height / 2 + 100, -carcassDepth / 2 - 12], // Стърчи напред
-        material: isGhost ? materials.ghost : materials.handle
+        material: isGhost ? PBRMaterials.ghost : PBRMaterials.metal_brushed_steel
       });
     }
 
@@ -157,20 +124,23 @@ export function ParametricCabinet({ cabinet, is2D, selected, isGhost, hasCollisi
         position={[x, 0, z]} 
         rotation={[0, -rotation, 0]}
         onPointerDown={(e) => {
-          if (isGhost) return;
+          if (isGhost || useCADStore.getState().currentCommand) return;
           e.stopPropagation();
-          selectEntity(cabinet.id, e.ctrlKey || e.metaKey);
-          startDragging(cabinet.id, 'cabinet', e.point.x, e.point.z, { ...cabinet.geometry });
+          const isAlreadySelected = useCADStore.getState().selection.includes(cabinet.id);
+          if (!isAlreadySelected) {
+            selectEntity(cabinet.id, e.ctrlKey || e.metaKey);
+          }
+          startDragging(cabinet.id, 'cabinet', e.point.x, e.point.z);
         }}
       >
         <mesh position={[0, height, 0]}>
           <boxGeometry args={[width, 1, depth]} />
-          <primitive object={isGhost ? materials.ghost : materials.wireframe} attach="material" />
+          <primitive object={isGhost ? PBRMaterials.ghost : PBRMaterials.wireframe} attach="material" />
         </mesh>
         {selected && !isGhost && (
            <mesh position={[0, height, 0]}>
             <boxGeometry args={[width + 4, 2, depth + 4]} />
-            <primitive object={materials.selected} attach="material" />
+            <primitive object={PBRMaterials.selected} attach="material" />
           </mesh>
         )}
       </group>
@@ -182,10 +152,13 @@ export function ParametricCabinet({ cabinet, is2D, selected, isGhost, hasCollisi
       position={[x, bottomY, z]} 
       rotation={[0, -rotation, 0]}
       onPointerDown={(e) => {
-        if (isGhost) return;
+        if (isGhost || useCADStore.getState().currentCommand) return;
         e.stopPropagation();
-        selectEntity(cabinet.id, e.ctrlKey || e.metaKey);
-        startDragging(cabinet.id, 'cabinet', e.point.x, e.point.z, { ...cabinet.geometry });
+        const isAlreadySelected = useCADStore.getState().selection.includes(cabinet.id);
+        if (!isAlreadySelected) {
+          selectEntity(cabinet.id, e.ctrlKey || e.metaKey);
+        }
+        startDragging(cabinet.id, 'cabinet', e.point.x, e.point.z);
       }}
       dispose={null}
     >
@@ -198,7 +171,7 @@ export function ParametricCabinet({ cabinet, is2D, selected, isGhost, hasCollisi
           receiveShadow={!isGhost}
         >
           <boxGeometry args={part.size as [number, number, number]} />
-          <primitive object={isGhost ? materials.ghost : part.material} attach="material" />
+          <primitive object={part.material} attach="material" />
         </mesh>
       ))}
 
@@ -215,7 +188,7 @@ export function ParametricCabinet({ cabinet, is2D, selected, isGhost, hasCollisi
       {selected && !isGhost && (
         <mesh position={[0, height / 2, 0]}>
           <boxGeometry args={[width + 4, height + 4, depth + 4]} />
-          <primitive object={materials.selected} attach="material" />
+          <primitive object={PBRMaterials.selected} attach="material" />
         </mesh>
       )}
 
@@ -223,7 +196,7 @@ export function ParametricCabinet({ cabinet, is2D, selected, isGhost, hasCollisi
       {hasCollision && !isGhost && (
         <mesh position={[0, height / 2, 0]}>
           <boxGeometry args={[width + 8, height + 8, depth + 8]} />
-          <primitive object={materials.collision} attach="material" />
+          <primitive object={PBRMaterials.collision} attach="material" />
         </mesh>
       )}
     </group>

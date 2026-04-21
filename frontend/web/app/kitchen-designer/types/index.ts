@@ -190,6 +190,34 @@ export interface CountertopEntity extends Entity {
   };
 }
 
+export interface FurnitureEntity extends Entity {
+  type: 'furniture';
+  geometry: {
+    position: Point2D;
+    width: number;
+    height: number;
+    depth: number;
+    rotation: number;
+    elevation: number;
+    orientation?: 'horizontal' | 'vertical';
+  };
+  properties: {
+    label: string;
+    material: 'marble' | 'granite' | 'quartz' | 'wood' | 'mdf' | 'melamine' | 'glass' | 'metal';
+    color: string;
+    finish: 'matte' | 'glossy';
+    overhang: {
+      front: number;
+      back: number;
+      left: number;
+      right: number;
+    };
+    backsplash: boolean;
+    backsplashHeight: number;
+    edgeRadius: number;
+  };
+}
+
 export interface Layer {
   name: string;
   color: number;
@@ -240,4 +268,27 @@ export interface CADDrawing {
   currentColor: number;
   currentLinetype: string;
   currentLineweight: number;
+}
+
+// --- BOM (Bill of Materials) & Cut List Types ---
+
+export type EdgeBandingType = 'none' | '1mm' | '2mm';
+
+export interface EdgeBanding {
+  L1: EdgeBandingType; // Long side 1
+  L2: EdgeBandingType; // Long side 2
+  W1: EdgeBandingType; // Short side 1
+  W2: EdgeBandingType; // Short side 2
+}
+
+export interface BOMPanel {
+  id: string; // Internal id 
+  cabinetId: string; // Which cabinet it belongs to
+  name: string; // eg. "Left Side", "Bottom", "Door"
+  material: string; // e.g. "MDF 18mm White", "HDF 3mm White"
+  length: number; // L
+  width: number;  // W
+  thickness: number;
+  quantity: number;
+  edgeBanding: EdgeBanding;
 }

@@ -10,9 +10,16 @@ interface CADState {
   drawing: CADDrawing | null;
   viewport: Viewport;
   
-  // View mode - 2d plan, 3d perspective, or elevation (frontal wall view)
-  viewMode: '2d' | '3d' | 'elevation';
+  // View mode - 2d plan, 3d perspective, elevation (frontal wall view), or fullscreen presentation
+  viewMode: '2d' | '3d' | 'elevation' | 'presentation';
   elevationWallId: string | null; // Selected wall for elevation view
+  
+  // Measurement Tool State
+  measurement: { start: Point2D | null, end: Point2D | null };
+  
+  // AI Assistant State
+  isAssistantOpen: boolean;
+  chatMessages: { role: 'user' | 'assistant', content: string }[];
   
   // Current drawing state
   currentCommand: string | null;
@@ -21,8 +28,8 @@ interface CADState {
   currentEntity: Entity | null;
   isDraggingObj: boolean;
   setDraggingObj: (isDragging: boolean) => void;
-  dragState: { id: string, type: string, offsetX: number, offsetZ: number, originalGeometry: any } | null;
-  startDragging: (id: string, type: string, x: number, z: number, geom: any) => void;
+  dragState: { id: string, type: string, offsetX: number, offsetZ: number, originalGeometries: Record<string, any> } | null;
+  startDragging: (id: string, type: string, x: number, z: number) => void;
   stopDragging: () => void;
   
   // Selection
@@ -37,21 +44,31 @@ interface CADState {
   // Actions
   initializeDrawing: (name: string) => void;
   setViewport: (viewport: Partial<Viewport>) => void;
-  setViewMode: (mode: '2d' | '3d' | 'elevation') => void;
+  setViewMode: (mode: '2d' | '3d' | 'elevation' | 'presentation') => void;
   setElevationWall: (wallId: string | null) => void;
   panViewport: (dx: number, dy: number) => void;
   zoomViewport: (factor: number, center?: Point2D) => void;
   rotateViewport: (deltaX: number, deltaY: number) => void; // 3D orbit controls
   resetView: () => void; // Reset to default view
   
+  // Measurement actions
+  setMeasurementStart: (point: Point2D | null) => void;
+  setMeasurementEnd: (point: Point2D | null) => void;
+  clearMeasurement: () => void;
+  
   // Command system
   startCommand: (command: string, options?: Record<string, any>) => void;
   endCommand: () => void;
   setCommandOption: (key: string, value: any) => void;
   
+  // AI Assistant actions
+  toggleAssistant: () => void;
+  addChatMessage: (role: 'user' | 'assistant', content: string) => void;
+  
   // Entity operations
   addEntity: (entity: Entity) => void;
   deleteEntity: (id: string) => void;
+  deleteSelection: () => void;
   updateEntity: (id: string, updates: Partial<Entity>) => void;
   setLocked: (ids: string[], locked: boolean) => void;
   
@@ -59,6 +76,9 @@ interface CADState {
   selectEntity: (id: string, additive?: boolean) => void;
   selectWindow: (corner1: Point2D, corner2: Point2D) => void;
   clearSelection: () => void;
+  
+  // Layer operations
+  toggleLayerVisiblity: (layerName: string) => void;
   
   // External Integrations
   importWizardLayout: (layout: any) => void;
@@ -141,23 +161,42 @@ const cadStore = create<CADState>()(
   
   viewMode: '2d' as const,
   elevationWallId: null,
+  measurement: { start: null, end: null },
   saveStatus: 'saved' as const,
   
   currentCommand: null,
+  isAssistantOpen: false,
+  chatMessages: [
+    { role: 'assistant', content: 'Здравей! Аз съм твоят AI асистент за проектиране на кухни. Как мога да ти помогна днес?' }
+  ],
   commandOptions: {},
   isDrawing: false,
   currentEntity: null,
   isDraggingObj: false,
   setDraggingObj: (isDragging) => set({ isDraggingObj: isDragging }),
-  dragState: null as { id: string, type: string, offsetX: number, offsetZ: number, originalGeometry: any } | null,
-  startDragging: (id, type, x, z, geom) => {
+  dragState: null as { id: string, type: string, offsetX: number, offsetZ: number, originalGeometries: Record<string, any> } | null,
+  startDragging: (id, type, x, z) => {
     const state = get();
     const entity = state.drawing?.entities.find(e => e.id === id);
     if (entity?.locked) return; // Block dragging if locked
     
+    // Capture ALL selected entities' original geometries for group dragging
+    const originalGeometries: Record<string, any> = {};
+    state.selection.forEach(sid => {
+      const ent = state.drawing?.entities.find(e => e.id === sid);
+      if (ent && !ent.locked) {
+        originalGeometries[sid] = JSON.parse(JSON.stringify(ent.geometry));
+      }
+    });
+
+    // Ensure the clicked entity (id) is included even if it somehow wasn't in selection
+    if (!originalGeometries[id] && entity) {
+      originalGeometries[id] = JSON.parse(JSON.stringify(entity.geometry));
+    }
+    
     set({ 
       isDraggingObj: true, 
-      dragState: { id, type, offsetX: x - geom.position.x, offsetZ: z - geom.position.y, originalGeometry: geom } 
+      dragState: { id, type, offsetX: x, offsetZ: z, originalGeometries } 
     });
   },
   stopDragging: () => set({ isDraggingObj: false, dragState: null }),
@@ -340,6 +379,18 @@ const cadStore = create<CADState>()(
       rotationY: 45,
     }
   })),
+
+  setMeasurementStart: (point) => set(state => ({
+    measurement: { ...state.measurement, start: point }
+  })),
+  
+  setMeasurementEnd: (point) => set(state => ({
+    measurement: { ...state.measurement, end: point }
+  })),
+  
+  clearMeasurement: () => set({
+    measurement: { start: null, end: null }
+  }),
   
   zoomViewport: (factor, center) => set(state => {
     const newScale = state.viewport.scale * factor;
@@ -379,6 +430,12 @@ const cadStore = create<CADState>()(
   setCommandOption: (key, value) => set(state => ({
     commandOptions: { ...state.commandOptions, [key]: value }
   })),
+
+  toggleAssistant: () => set(state => ({ isAssistantOpen: !state.isAssistantOpen })),
+  
+  addChatMessage: (role, content) => set(state => ({
+    chatMessages: [...state.chatMessages, { role, content }]
+  })),
   
   addEntity: (entity) => set(state => state.drawing ? ({
     drawing: {
@@ -394,6 +451,26 @@ const cadStore = create<CADState>()(
     },
     selection: state.selection.filter((sid: string) => sid !== id)
   }) : {}),
+
+  deleteSelection: () => set(state => {
+    if (!state.drawing || state.selection.length === 0) return state;
+    
+    // Safety: Don't delete locked entities
+    const entitiesToDelete = state.selection.filter(id => {
+      const ent = state.drawing?.entities.find(e => e.id === id);
+      return !ent?.locked;
+    });
+
+    if (entitiesToDelete.length === 0) return state;
+
+    return {
+      drawing: {
+        ...state.drawing,
+        entities: state.drawing.entities.filter(e => !entitiesToDelete.includes(e.id))
+      },
+      selection: state.selection.filter(id => !entitiesToDelete.includes(id))
+    };
+  }),
   
   updateEntity: (id, updates) => set(state => state.drawing ? ({
     drawing: {
@@ -443,6 +520,18 @@ const cadStore = create<CADState>()(
   
   clearSelection: () => set({ selection: [] }),
   
+  toggleLayerVisiblity: (layerName) => set(state => {
+    if (!state.drawing) return state;
+    return {
+      drawing: {
+        ...state.drawing,
+        layers: state.drawing.layers.map(l => 
+          l.name === layerName ? { ...l, on: !l.on } : l
+        )
+      }
+    };
+  }),
+
   startLine: (start) => {
     const state = get();
     if (!state.drawing) return;

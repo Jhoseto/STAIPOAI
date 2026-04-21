@@ -10,12 +10,24 @@ import { ModernSystemToolbar } from './components/ModernSystemToolbar';
 import { ModernPropertiesPanel } from './components/ModernPropertiesPanel';
 import { StartScreen } from './components/StartScreen';
 import { RoomWizard } from './components/RoomWizard';
+import { AIChatPanel } from './components/AIChatPanel';
 
 type ViewMode = 'start' | 'wizard' | 'cad';
 
 export default function KitchenDesignerPage() {
-  const { drawing, initializeDrawing } = useCADStore();
+  const { drawing, initializeDrawing, viewMode: cadViewMode, setViewMode: setCadViewMode } = useCADStore();
   const [viewMode, setViewMode] = useState<ViewMode>('start');
+
+  // Handle exiting presentation mode via Escape key
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && cadViewMode === 'presentation') {
+        setCadViewMode('3d');
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [cadViewMode, setCadViewMode]);
 
   const handleQuickStart = () => {
     setViewMode('wizard');
@@ -83,14 +95,24 @@ export default function KitchenDesignerPage() {
           <div className="absolute top-[-10%] right-[-5%] w-[40%] h-[40%] rounded-full bg-white blur-[130px] opacity-60 pointer-events-none" />
         </div>
 
-        <ModernSystemToolbar />
+        {cadViewMode !== 'presentation' && <ModernSystemToolbar />}
         <div className="flex-1 flex overflow-hidden relative z-10">
-          <ModernCADToolbar />
+          {cadViewMode !== 'presentation' && <ModernCADToolbar />}
           <div className="flex-1 relative bg-transparent shadow-inner overflow-hidden">
             <CADViewer />
           </div>
-          <ModernPropertiesPanel />
+          {cadViewMode !== 'presentation' && <ModernPropertiesPanel />}
         </div>
+        
+        {/* AI Assistant Panel */}
+        <AIChatPanel />
+        
+        {/* Presentation mode exit hint */}
+        {cadViewMode === 'presentation' && (
+          <div className="absolute top-6 left-1/2 -translate-x-1/2 px-6 py-2 bg-black/60 backdrop-blur-md text-white/90 text-sm rounded-full shadow-2xl pointer-events-none z-50 animate-pulse">
+            Натиснете <strong>ESC</strong> за изход от презентация
+          </div>
+        )}
       </div>
     </AppShell>
   );

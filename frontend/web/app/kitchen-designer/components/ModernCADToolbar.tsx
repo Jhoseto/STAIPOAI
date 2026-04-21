@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Pencil, Square, LayoutGrid, Box, Settings, Search, Move, MousePointer2, ShieldAlert } from 'lucide-react';
+import { Pencil, Square, LayoutGrid, Box, Settings, Search, Move, MousePointer2, ShieldAlert, Layers } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCADStore } from '../store/cad-store';
 
@@ -11,6 +11,7 @@ export function ModernCADToolbar() {
     { id: 'SELECT', icon: MousePointer2, label: 'Избор' },
     { id: 'WALL', icon: Pencil, label: 'Чертане на стена' },
     { id: 'CABINET', icon: Box, label: 'Библиотека шкафове' },
+    { id: 'FURNITURE', icon: Layers, label: 'Плотове/Панели' },
     { id: 'DOOR', icon: Square, label: 'Врати и прозорци' },
     { id: 'MOVE', icon: Move, label: 'Преместване' },
   ];

@@ -23,9 +23,13 @@ export function ParametricAppliance({ appliance, is2D, selected }: ApplianceProp
         position={[position.x, 0, position.y]} 
         rotation={[0, -rotation, 0]}
         onPointerDown={(e) => {
+          if (useCADStore.getState().currentCommand) return;
           e.stopPropagation();
-          selectEntity(appliance.id, e.ctrlKey || e.metaKey);
-          startDragging(appliance.id, 'appliance', e.point.x, e.point.z, { ...appliance.geometry });
+          const isAlreadySelected = useCADStore.getState().selection.includes(appliance.id);
+          if (!isAlreadySelected) {
+            selectEntity(appliance.id, e.ctrlKey || e.metaKey);
+          }
+          startDragging(appliance.id, 'appliance', e.point.x, e.point.z);
         }}
       >
         <mesh position={[0, 105, 0]}>
@@ -124,9 +128,13 @@ export function ParametricAppliance({ appliance, is2D, selected }: ApplianceProp
       position={[position.x, elevation, position.y]} 
       rotation={[0, -rotation, 0]}
       onPointerDown={(e) => {
+        if (useCADStore.getState().currentCommand) return;
         e.stopPropagation();
-        selectEntity(appliance.id, e.ctrlKey || e.metaKey);
-        startDragging(appliance.id, 'appliance', e.point.x, e.point.z, { ...appliance.geometry });
+        const isAlreadySelected = useCADStore.getState().selection.includes(appliance.id);
+        if (!isAlreadySelected) {
+          selectEntity(appliance.id, e.ctrlKey || e.metaKey);
+        }
+        startDragging(appliance.id, 'appliance', e.point.x, e.point.z);
       }}
     >
       {renderModel()}

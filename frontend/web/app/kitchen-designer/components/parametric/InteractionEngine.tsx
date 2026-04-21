@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useThree } from '@react-three/fiber';
-import { Html } from '@react-three/drei';
+import { Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import { useCADStore } from '../../store/cad-store';
 import { ParametricCabinet } from './ParametricCabinet';
 import { ParametricWall } from './ParametricWall';
-import { CabinetEntity, WallEntity, Point2D } from '../../types';
-import { calculateSnap } from '../../lib/snap-engine';
+import { ParametricFurniture } from './ParametricFurniture';
+import { CabinetEntity, WallEntity, Point2D, FurnitureEntity } from '../../types';
+import { calculateSnap, calculateFurnitureSnap } from '../../lib/snap-engine';
 
 import { DimensionLine } from './DimensionLine';
 
@@ -28,10 +29,15 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
     updateEntity,
     copySelection,
     pasteSelection,
+    deleteSelection,
     selection,
     dragState,
     setDraggingObj,
-    stopDragging
+    stopDragging,
+    measurement,
+    setMeasurementStart,
+    setMeasurementEnd,
+    clearMeasurement
   } = useCADStore();
   
   // derive cabinet dimensions from commandOptions (set by CabinetLibrary)
@@ -40,6 +46,13 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
   const cabinetHeight      = commandOptions?.height      ?? 720;
   const cabinetType        = commandOptions?.cabinetType ?? 'base';
   const cabinetFloorOffset = commandOptions?.floorOffset ?? 100;
+
+  // derive slab/furniture dimensions from commandOptions (set by SlabLibrary)
+  const slabWidth          = commandOptions?.width       ?? 600;
+  const slabDepth          = commandOptions?.depth       ?? 600;
+  const slabHeight         = commandOptions?.height      ?? 18;
+  const slabOrientation    = commandOptions?.orientation ?? 'horizontal';
+  const slabLabel          = commandOptions?.label       ?? 'Рафт/Страница';
   
   const { camera, pointer, raycaster } = useThree();
   const floorRef = useRef<THREE.Mesh>(null);
@@ -56,25 +69,40 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
   // Keyboard events (Escape, Rotate)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && currentCommand === 'CABINET') {
+      if (e.code === 'Space' && (currentCommand === 'CABINET' || currentCommand === 'FURNITURE')) {
         e.preventDefault();
         setGhostRotation(r => r + Math.PI / 2);
       } else if (e.code === 'Escape') {
         if (currentCommand === 'WALL' && isDrawing) {
           finishWall();
+        } else if (currentCommand === 'MEASURE') {
+          clearMeasurement();
+          endCommand();
         } else {
           endCommand();
           clearSelection();
+          clearMeasurement();
         }
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC') {
         copySelection();
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV') {
         pasteSelection();
+      } else if (e.code === 'Delete' || e.code === 'Backspace') {
+        // Don't delete if we are typing in an input field
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+          return;
+        }
+
+        // Only delete if we are not currently drawing or typing elsewhere
+        if (!isDrawing && currentCommand !== 'WALL') {
+          deleteSelection();
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentCommand, isDrawing, finishWall, endCommand, clearSelection, copySelection, pasteSelection]);
+  }, [currentCommand, isDrawing, finishWall, endCommand, clearSelection, copySelection, pasteSelection, deleteSelection]);
 
   if (!drawing) return null;
 
@@ -124,57 +152,116 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
            setGhostRotation(snapRes.rotation);
         }
       }
-    } else if (currentCommand === 'WALL' || currentCommand === 'PASTE') {
+    } else if (currentCommand === 'FURNITURE') {
+      // Smart snapping for furniture panels
+      const furGeom = { width: slabWidth, depth: slabDepth, height: slabHeight, orientation: slabOrientation };
+      const snapRes = calculateFurnitureSnap({ x, y: z }, furGeom, drawing.entities, ghostRotation);
+      setGhostPos(new THREE.Vector3(snapRes.position.x, 0, snapRes.position.y));
+      if (snapRes.snapped) {
+        setGhostRotation(snapRes.rotation);
+      }
+    } else if (currentCommand === 'WALL' || currentCommand === 'PASTE' || currentCommand === 'MEASURE') {
       const snapped = getVertexSnap({ x, y: z }, drawing.entities);
       setGhostPos(new THREE.Vector3(snapped.x, 0, snapped.y));
     }
 
     if (dragState) {
-      // Invisible Drag Update
+      // 1. Calculate raw movement delta from mouse interaction
       let dx = e.point.x - dragState.offsetX;
       let dz = e.point.z - dragState.offsetZ;
       
-      const entity = drawing.entities.find(ent => ent.id === dragState.id);
-      if (entity) {
-        if (entity.type === 'cabinet') {
-          let newX = dragState.originalGeometry.position.x + dx;
-          let newZ = dragState.originalGeometry.position.y + dz;
-          if (drawing.gridSettings.snap) {
-            const snapSize = 100;
-            newX = Math.round(newX / snapSize) * snapSize;
-            newZ = Math.round(newZ / snapSize) * snapSize;
-          }
-          
-          const snapRes = calculateSnap({ x: newX, y: newZ }, entity as CabinetEntity, drawing.entities, entity.geometry.rotation);
-          
-          updateEntity(entity.id, { 
+      const leaderOrigGeom = dragState.originalGeometries[dragState.id];
+      if (!leaderOrigGeom) return;
+
+      let finalDisplacement = { x: dx, z: dz };
+
+      // 2. Determine the "Final Displacement" based on the Leader's snapping/constraints
+      if ('position' in leaderOrigGeom) {
+        let newX = leaderOrigGeom.position.x + dx;
+        let newZ = leaderOrigGeom.position.y + dz;
+
+        // Apply grid snap to leader
+        if (drawing.gridSettings.snap) {
+          const snapSize = 100;
+          newX = Math.round(newX / snapSize) * snapSize;
+          newZ = Math.round(newZ / snapSize) * snapSize;
+        }
+
+        // Apply Snap Engine (walls/cabinets) to leader
+        const leaderEntity = drawing.entities.find(ent => ent.id === dragState.id);
+        if (leaderEntity?.type === 'cabinet') {
+          const snapRes = calculateSnap({ x: newX, y: newZ }, leaderEntity as CabinetEntity, drawing.entities, leaderEntity.geometry.rotation);
+          newX = snapRes.position.x;
+          newZ = snapRes.position.y;
+        } else if (leaderEntity?.type === 'furniture') {
+          const furGeom = {
+            width: leaderEntity.geometry.width,
+            depth: leaderEntity.geometry.depth,
+            height: leaderEntity.geometry.height,
+            orientation: (leaderEntity as FurnitureEntity).geometry.orientation,
+          };
+          const snapRes = calculateFurnitureSnap({ x: newX, y: newZ }, furGeom, drawing.entities, leaderEntity.geometry.rotation);
+          newX = snapRes.position.x;
+          newZ = snapRes.position.y;
+        }
+
+        // Calculate the ACTUAL displacement that the leader experienced after snapping
+        finalDisplacement.x = newX - leaderOrigGeom.position.x;
+        finalDisplacement.z = newZ - leaderOrigGeom.position.y;
+      } else if ('start' in leaderOrigGeom) {
+        // Wall leader logic
+        if (drawing.gridSettings.snap) {
+           const snapSize = 100;
+           finalDisplacement.x = Math.round(dx / snapSize) * snapSize;
+           finalDisplacement.z = Math.round(dz / snapSize) * snapSize;
+        }
+      }
+
+      // 3. Apply the same Final Displacement to ALL entities in the drag group
+      Object.entries(dragState.originalGeometries).forEach(([id, origGeom]) => {
+        if ('position' in origGeom) {
+          // Universal Position-based objects (Cabinets, Countertops, Appliances, Furniture)
+          updateEntity(id, { 
             geometry: { 
-              ...entity.geometry, 
-              position: { x: snapRes.position.x, y: snapRes.position.y },
-              rotation: snapRes.snapped ? snapRes.rotation : entity.geometry.rotation
+              ...origGeom, 
+              position: { 
+                x: origGeom.position.x + finalDisplacement.x, 
+                y: origGeom.position.y + finalDisplacement.z 
+              }
             } 
           });
-        } else if (entity.type === 'wall') {
-          if (drawing.gridSettings.snap) {
-            const snapSize = 100;
-            dx = Math.round(dx / snapSize) * snapSize;
-            dz = Math.round(dz / snapSize) * snapSize;
-          }
-          updateEntity(entity.id, {
+        } else if ('start' in origGeom) {
+          // Wall objects
+          updateEntity(id, {
             geometry: {
-              ...entity.geometry,
-              start: { x: dragState.originalGeometry.start.x + dx, y: dragState.originalGeometry.start.y + dz },
-              end: { x: dragState.originalGeometry.end.x + dx, y: dragState.originalGeometry.end.y + dz }
+              ...origGeom,
+              start: { 
+                x: origGeom.start.x + finalDisplacement.x, 
+                y: origGeom.start.y + finalDisplacement.z 
+              },
+              end: { 
+                x: origGeom.end.x + finalDisplacement.x, 
+                y: origGeom.end.y + finalDisplacement.z 
+              }
             }
           });
         }
-      }
+      });
     } else if (isSelecting && selectionStart) {
       setSelectionEnd(new THREE.Vector3(e.point.x, 0, e.point.z));
     }
   };
 
   const handlePointerDown = (e: any) => {
+    // Right Click (2) to cancel current command (switch to Select mode)
+    if (e.button === 2) {
+      if (currentCommand) {
+        endCommand();
+        clearSelection();
+      }
+      return;
+    }
+
     // Only intercept Left Click (0)
     if (e.button !== 0 || !e.point) return;
     
@@ -190,9 +277,7 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
     const currentPoint: Point2D = { x, y: z }; // Map 3D 'z' to CAD 'y'
 
     if (currentCommand === 'CABINET') {
-      // Don't place if no preset was chosen yet
       if (!commandOptions?.cabinetType) return;
-      
       const snapResult = calculateSnap(currentPoint, { geometry: { width: cabinetWidth, depth: cabinetDepth } } as CabinetEntity, drawing.entities, ghostRotation);
       
       const newCabinet: CabinetEntity = {
@@ -224,11 +309,43 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
       };
       addEntity(newCabinet);
     }
+    else if (currentCommand === 'FURNITURE') {
+      if (!commandOptions?.width) return; // Don't place until a preset is selected
+      const newFurniture: FurnitureEntity = {
+        id: crypto.randomUUID(),
+        type: 'furniture',
+        layer: 'FURNITURE',
+        color: 4,
+        linetype: 'CONTINUOUS',
+        lineweight: 0.25,
+        visible: true,
+        locked: false,
+        geometry: {
+          position: { x, y: z },
+          width: slabWidth,
+          height: slabHeight,
+          depth: slabDepth,
+          rotation: ghostRotation,
+          elevation: 0,
+          orientation: slabOrientation as any,
+        },
+        properties: {
+          label: slabLabel,
+          material: 'melamine',
+          color: '#f1f5f9',
+          finish: 'matte',
+          overhang: { front: 0, back: 0, left: 0, right: 0 },
+          backsplash: false,
+          backsplashHeight: 50,
+          edgeRadius: 0
+        }
+      };
+      addEntity(newFurniture);
+    }
     else if (currentCommand === 'PASTE') {
       const entitiesToPaste = commandOptions?.entities as any[];
       if (!entitiesToPaste || entitiesToPaste.length === 0) return;
 
-      // Calculate anchor (center of group or first object)
       const anchor = entitiesToPaste[0].geometry.position;
       const dx = currentPoint.x - anchor.x;
       const dy = currentPoint.y - anchor.y;
@@ -251,6 +368,14 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
         continueWall(snapped);
       }
     } 
+    else if (currentCommand === 'MEASURE') {
+      const snapped = getVertexSnap(currentPoint, drawing.entities);
+      if (!measurement.start) {
+        setMeasurementStart(snapped);
+      } else {
+        setMeasurementEnd(snapped);
+      }
+    } 
     else if (currentCommand === 'SELECT' || !currentCommand) {
       clearSelection();
       setIsSelecting(true);
@@ -259,7 +384,6 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
       setSelectionEnd(rawStart);
       return;
     }
-    
   };
 
   const handlePointerUp = (e: any) => {
@@ -269,7 +393,6 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
     }
 
     if (isSelecting && selectionStart && selectionEnd) {
-      // Execute selection query in store
       selectWindow(
         { x: selectionStart.x, y: selectionStart.z },
         { x: selectionEnd.x, y: selectionEnd.z }
@@ -283,7 +406,6 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
   // The visual "Ghost" representing the active action
   const renderGhost = () => {
     if (currentCommand === 'CABINET') {
-      // Don't show ghost until user picks a preset from the library
       if (!commandOptions?.cabinetType) return null;
       
       const ghostCabinet = {
@@ -291,10 +413,35 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
       } as CabinetEntity;
       return <ParametricCabinet cabinet={ghostCabinet} is2D={is2D} isGhost={true} />;
     }
+
+    if (currentCommand === 'FURNITURE') {
+      if (!commandOptions?.width) return null; // Don't show ghost until a preset is selected
+      const ghostSlab = {
+        id: 'ghost-slab',
+        type: 'furniture',
+        geometry: {
+          position: { x: ghostPos.x, y: ghostPos.z },
+          width: slabWidth,
+          height: slabHeight,
+          depth: slabDepth,
+          rotation: ghostRotation,
+          elevation: 0,
+          orientation: slabOrientation
+        },
+        properties: {
+          label: slabLabel,
+          material: 'melamine',
+          overhang: { front: 0, back: 0, left: 0, right: 0 },
+          backsplash: false,
+          backsplashHeight: 50,
+          edgeRadius: 0
+        }
+      } as FurnitureEntity;
+      return <ParametricFurniture furniture={ghostSlab} is2D={is2D} />;
+    }
     
     if (currentCommand === 'WALL') {
       if (isDrawing && currentEntity) {
-        // Рисуваме активната 3D стена в реално време, докато движим мишката
         const activeWall: WallEntity = {
           ...currentEntity,
           geometry: {
@@ -322,7 +469,6 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
           </group>
         );
       } else {
-        // Показваме малък ориентир (сферичка или мини кубче) къде ще започне стената
         return (
           <mesh position={[ghostPos.x, 10, ghostPos.z]}>
             <sphereGeometry args={[30, 16, 16]} />
@@ -333,7 +479,6 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
     }
 
     if (isSelecting && selectionStart && selectionEnd) {
-      // Draw Marquee Selection Box
       const minX = Math.min(selectionStart.x, selectionEnd.x);
       const maxX = Math.max(selectionStart.x, selectionEnd.x);
       const minZ = Math.min(selectionStart.z, selectionEnd.z);
@@ -343,7 +488,6 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
         <mesh position={[(minX + maxX)/2, 5, (minZ + maxZ)/2]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[maxX - minX, maxZ - minZ]} />
           <meshBasicMaterial color="#3b82f6" transparent opacity={0.2} depthTest={false} side={THREE.DoubleSide} />
-          {/* Box outline */}
           <lineSegments>
             <edgesGeometry args={[new THREE.PlaneGeometry(maxX - minX, maxZ - minZ)]} />
             <lineBasicMaterial color="#2563eb" depthTest={false} />
@@ -376,6 +520,42 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
           ))}
         </group>
       );
+    }
+
+    if (currentCommand === 'MEASURE' || (measurement.start && measurement.end)) {
+      const start = measurement.start;
+      const end = measurement.end || { x: ghostPos.x, y: ghostPos.z };
+      
+      if (start) {
+        const dx = end.x - start.x;
+        const dz = end.y - start.y;
+        const length = Math.round(Math.hypot(dx, dz));
+        
+        return (
+          <group>
+            <Line
+              points={[
+                [start.x, 15, start.y],
+                [end.x, 15, end.y]
+              ]}
+              color="#3b82f6"
+              lineWidth={2}
+              dashed={!measurement.end}
+              dashSize={100}
+              gapSize={50}
+            />
+            {/* Ticks */}
+            <Line points={[[start.x, 0, start.y], [start.x, 100, start.y]]} color="#3b82f6" lineWidth={1} />
+            <Line points={[[end.x, 0, end.y], [end.x, 100, end.y]]} color="#3b82f6" lineWidth={1} />
+            
+            <Html position={[(start.x + end.x)/2, 100, (start.y + end.y)/2]} center className="pointer-events-none">
+              <div className="bg-blue-600 text-white px-2 py-1 rounded-md text-[10px] font-black shadow-xl border border-white/20 whitespace-nowrap backdrop-blur-sm">
+                {length} mm
+              </div>
+            </Html>
+          </group>
+        );
+      }
     }
 
     return null;
@@ -418,6 +598,7 @@ export function InteractionEngine({ is2D }: { is2D: boolean }) {
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onContextMenu={(e) => (e as any).nativeEvent.preventDefault()}
       >
         <planeGeometry args={[100000, 100000]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
