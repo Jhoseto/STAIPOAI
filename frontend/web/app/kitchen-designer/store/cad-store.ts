@@ -70,6 +70,7 @@ interface CADState {
   deleteEntity: (id: string) => void;
   deleteSelection: () => void;
   updateEntity: (id: string, updates: Partial<Entity>) => void;
+  updateAllEntities: (filter: (e: Entity) => boolean, updates: Partial<Entity>) => void;
   setLocked: (ids: string[], locked: boolean) => void;
   
   // Selection operations
@@ -483,6 +484,13 @@ const cadStore = create<CADState>()(
         }
         return e;
       })
+    }
+  }) : {}),
+
+  updateAllEntities: (filter, updates) => set(state => state.drawing ? ({
+    drawing: {
+      ...state.drawing,
+      entities: state.drawing.entities.map((e: Entity) => filter(e) ? { ...e, ...updates } : e)
     }
   }) : {}),
 

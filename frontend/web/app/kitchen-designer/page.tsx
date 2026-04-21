@@ -10,7 +10,7 @@ import { ModernSystemToolbar } from './components/ModernSystemToolbar';
 import { ModernPropertiesPanel } from './components/ModernPropertiesPanel';
 import { StartScreen } from './components/StartScreen';
 import { RoomWizard } from './components/RoomWizard';
-import { AIChatPanel } from './components/AIChatPanel';
+import { AgentPanel } from './ai-agent/frontend';
 
 type ViewMode = 'start' | 'wizard' | 'cad';
 
@@ -102,10 +102,8 @@ export default function KitchenDesignerPage() {
             <CADViewer />
           </div>
           {cadViewMode !== 'presentation' && <ModernPropertiesPanel />}
+          <AgentPanel />
         </div>
-        
-        {/* AI Assistant Panel */}
-        <AIChatPanel />
         
         {/* Presentation mode exit hint */}
         {cadViewMode === 'presentation' && (

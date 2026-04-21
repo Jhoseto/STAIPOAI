@@ -6,6 +6,7 @@ import { useCADStore } from '../store/cad-store';
 import { ParametricCabinet } from './parametric/ParametricCabinet';
 import { ParametricWall } from './parametric/ParametricWall';
 import { InteractionEngine } from './parametric/InteractionEngine';
+import { AutoGeometryEngine } from './parametric/AutoGeometryEngine';
 import { CabinetEntity, WallEntity, CountertopEntity, ApplianceEntity, FurnitureEntity } from '../types';
 import { CabinetLibrary } from './CabinetLibrary';
 import { getCollidingIds } from '../lib/collision-detection';
@@ -94,7 +95,7 @@ export function CADViewer() {
         />
         <directionalLight position={[-1000, 1000, 1000]} intensity={0.4} color="#e0e7ff" />
 
-        {!is2D && <Environment preset="city" background={false} />}
+        <Environment preset="city" />
 
         {/* Свежа, светла мрежа (Grid) - Скрита в presentation mode */}
         {!isPresentation && (
@@ -155,6 +156,7 @@ function SceneGraph({ is2D, isPresentation }: { is2D: boolean, isPresentation: b
 
   return (
     <group>
+      <AutoGeometryEngine />
       {visibleEntities.map(entity => {
         const isSelected = selection.includes(entity.id);
 
